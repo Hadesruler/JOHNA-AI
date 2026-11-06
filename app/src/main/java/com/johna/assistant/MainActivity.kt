@@ -8,6 +8,16 @@ import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.app.Notification
 import java.net.URL
+import java.net.HttpURLConnection
+import android.util.Base64
+import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyProperties
+import javax.crypto.Cipher
+import javax.crypto.KeyGenerator
+import javax.crypto.spec.GCMParameterSpec
+import java.security.KeyStore
+import org.json.JSONArray
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import org.json.JSONObject
 import android.content.pm.PackageManager
 import android.os.Bundle
@@ -64,11 +74,120 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
  private var heard by mutableStateOf("Πάτησε Μίλα ή ενεργοποίησε τη συνομιλία")
  private var continuous by mutableStateOf(false)
  private var history = mutableStateListOf<Pair<String, String>>()
+ private var apiKey by mutableStateOf("")
+ private var keyConfigured by mutableStateOf(false)
+ private var requestGeneration = 0
+ private val conversationFile by lazy { java.io.File(filesDir, "johna_conversation.json") }
+ private fun cipherKey(): javax.crypto.SecretKey {
+  val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+  val existing = store.getKey("johna_gemini_key", null) as? javax.crypto.SecretKey
+  if (existing != null) return existing
+  val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
+  generator.init(KeyGenParameterSpec.Builder("johna_gemini_key",
+   KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
+   .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+   .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE).build())
+  return generator.generateKey()
+ }
+ private fun saveKey(value: String) {
+  try {
+   val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+   cipher.init(Cipher.ENCRYPT_MODE, cipherKey())
+   val payload = Base64.encodeToString(cipher.iv + cipher.doFinal(value.toByteArray(Charsets.UTF_8)), Base64.NO_WRAP)
+   getSharedPreferences("johna_secure", MODE_PRIVATE).edit().putString("key", payload).apply()
+   apiKey = value; keyConfigured = true; status = "Gemini AI συνδεδεμένο"
+  } catch (_: Exception) { status = "Αποτυχία αποθήκευσης κλειδιού" }
+ }
+ private fun loadKey(): String {
+  return try {
+   val payload = getSharedPreferences("johna_secure", MODE_PRIVATE).getString("key", null) ?: return ""
+   val bytes = Base64.decode(payload, Base64.NO_WRAP)
+   val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+   cipher.init(Cipher.DECRYPT_MODE, cipherKey(), GCMParameterSpec(128, bytes.copyOfRange(0, 12)))
+   String(cipher.doFinal(bytes.copyOfRange(12, bytes.size)), Charsets.UTF_8)
+  } catch (_: Exception) { "" }
+ }
+ private fun loadHistory() {
+  try {
+   val arr = JSONArray(conversationFile.readText())
+   for (i in 0 until arr.length()) {
+    val item = arr.getJSONObject(i)
+    history.add(item.getString("user") to item.getString("assistant"))
+   }
+  } catch (_: Exception) {}
+ }
+ private fun persistHistory() {
+  try {
+   val arr = JSONArray()
+   history.takeLast(20).forEach { (q,r) -> arr.put(JSONObject().put("user",q).put("assistant",r)) }
+   conversationFile.writeText(arr.toString())
+  } catch (_: Exception) {}
+ }
+ private fun clearHistory() { history.clear(); conversationFile.delete(); status = "Η μνήμη διαγράφηκε" }
+ private fun askGemini(words: String) {
+  val key = apiKey
+  if (key.isBlank()) { speak("Άνοιξε τις ρυθμίσεις AI και αποθήκευσε το Gemini API key."); return }
+  status = "Σκέφτομαι..."
+  val generation = ++requestGeneration
+  val context = history.takeLast(8).toList()
+  Thread {
+   var reply: String
+   var success = false
+   try {
+    val contents = JSONArray()
+    context.forEach { (q,r) ->
+     contents.put(JSONObject().put("role","user").put("parts",JSONArray().put(JSONObject().put("text",q))))
+     contents.put(JSONObject().put("role","model").put("parts",JSONArray().put(JSONObject().put("text",r))))
+    }
+    contents.put(JSONObject().put("role","user").put("parts",JSONArray().put(JSONObject().put("text",words))))
+    val body = JSONObject()
+     .put("systemInstruction",JSONObject().put("parts",JSONArray().put(JSONObject().put("text",
+      "Είσαι η JOHNA, φιλική έξυπνη φωνητική βοηθός. Απάντησε στα ελληνικά, φυσικά και σύντομα (συνήθως 1-3 προτάσεις). Μην ισχυρίζεσαι ότι χειρίζεσαι συσκευές αν δεν έχεις πρόσβαση."))))
+     .put("contents",contents)
+     .put("generationConfig",JSONObject().put("maxOutputTokens",400))
+    val conn = URL("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent").openConnection() as HttpURLConnection
+    try {
+     conn.requestMethod = "POST"; conn.connectTimeout = 10000; conn.readTimeout = 25000
+     conn.setRequestProperty("Content-Type","application/json")
+     conn.setRequestProperty("x-goog-api-key",key)
+     conn.doOutput = true
+     conn.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
+     val code = conn.responseCode
+     if (code !in 200..299) {
+      reply = when (code) {
+       400 -> "Το αίτημα AI δεν έγινε δεκτό."
+       401,403 -> "Το κλειδί Gemini δεν έγινε δεκτό. Έλεγξε το API key."
+       429 -> "Φτάσαμε προσωρινά το δωρεάν όριο του Gemini."
+       else -> "Το Gemini δεν απάντησε. Σφάλμα $code."
+      }
+     } else {
+      val json = JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
+      val parts = json.getJSONArray("candidates").getJSONObject(0).getJSONObject("content").getJSONArray("parts")
+      reply = (0 until parts.length()).mapNotNull { i -> parts.getJSONObject(i).optString("text").takeIf { it.isNotBlank() } }.joinToString(" ").trim()
+      success = reply.isNotBlank()
+      if (!success) reply = "Δεν πήρα απάντηση. Μπορείς να επαναλάβεις;"
+     }
+    } finally { conn.disconnect() }
+   } catch (_: Exception) { reply = "Δεν μπόρεσα να συνδεθώ με το Gemini. Έλεγξε το Internet." }
+   main.post {
+    if (generation != requestGeneration || isDestroyed) return@post
+    if (success) {
+     history.add(words to reply)
+     while (history.size > 20) history.removeAt(0)
+     persistHistory()
+    }
+    speak(reply)
+   }
+  }.start()
+ }
  private val permission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
   if (granted) beginListening() else { active = false; status = "Χρειάζεται άδεια μικροφώνου" }
  }
  override fun onCreate(savedInstanceState: Bundle?) {
   super.onCreate(savedInstanceState)
+  apiKey = loadKey()
+  keyConfigured = apiKey.isNotBlank()
+  loadHistory()
   tts = TextToSpeech(this, this)
   tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
    override fun onStart(utteranceId: String?) { main.post { speaking = true; status = "Μιλάω" } }
@@ -78,8 +197,10 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
   NotificationBridge.onUpdate = { items -> main.post { notifications = items } }
   refreshWeather()
   setContent {
-   JohnaScreen(status, heard, history.toList(), continuous, weather, weatherDetails, notifications, agentInfo, wakeEnabled,
+   JohnaScreen(status, heard, continuous, weather, weatherDetails, notifications, agentInfo, wakeEnabled, keyConfigured,
     onWeather = { refreshWeather() },
+    onSaveKey = { saveKey(it) },
+    onClearHistory = { clearHistory() },
     onNotifications = { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) },
     onWake = { wakeEnabled = it; agentInfo = if (it) "Hey Johna: απαιτείται wake-word engine · μη ενεργό" else "Wake word απενεργοποιημένο" },
     onContinuous = { enabled -> continuous = enabled; if (enabled) { active = true; requestListen() } else stopConversation() },
@@ -96,7 +217,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
   } else status = "Η υπηρεσία φωνής δεν ξεκίνησε"
  }
  private fun stopConversation() {
-  active = false; continuous = false; listening = false
+  requestGeneration++; active = false; continuous = false; listening = false
   recognizer?.cancel(); recognizer?.destroy(); recognizer = null
   tts?.stop(); speaking = false; status = "Σταμάτησε"
  }
@@ -133,10 +254,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
      val words = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty().trim()
      if (words.isBlank()) { if (active && continuous) main.postDelayed({ beginListening() }, 600); return }
      heard = words
-     val reply = localReply(words)
-     history.add(words to reply)
-     if (history.size > 25) history.removeAt(0)
-     speak(reply)
+     askGemini(words)
     }
     override fun onPartialResults(partialResults: Bundle?) {
      val partial = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
@@ -187,10 +305,12 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
 }
 
 @Composable
-fun JohnaScreen(status: String, heard: String, history: List<Pair<String,String>>, continuous: Boolean,
- weather: String, weatherDetails: String, notifications: List<String>, agentInfo: String, wakeEnabled: Boolean,
- onWeather: () -> Unit, onNotifications: () -> Unit, onWake: (Boolean) -> Unit,
+fun JohnaScreen(status: String, heard: String, continuous: Boolean,
+ weather: String, weatherDetails: String, notifications: List<String>, agentInfo: String, wakeEnabled: Boolean, keyConfigured: Boolean,
+ onWeather: () -> Unit, onSaveKey: (String) -> Unit, onClearHistory: () -> Unit, onNotifications: () -> Unit, onWake: (Boolean) -> Unit,
  onContinuous: (Boolean) -> Unit, onListen: () -> Unit, onStop: () -> Unit, onHello: () -> Unit) {
+ var showAiSettings by remember { mutableStateOf(false) }
+ var keyDraft by remember { mutableStateOf("") }
  val bg = Color(0xFF080717)
  val panel = Color(0xFF15122B)
  val purple = Color(0xFFB13CFF)
@@ -205,7 +325,7 @@ fun JohnaScreen(status: String, heard: String, history: List<Pair<String,String>
    Column { Text(clock, color=Color.White, fontSize=25.sp, fontWeight=FontWeight.Bold); Text(date, color=cyan, fontSize=11.sp) }
    Column(horizontalAlignment=Alignment.CenterHorizontally) {
     Text("JOHNA AI", color=Color(0xFFF2D8FF), fontSize=if(narrow) 24.sp else 33.sp, fontWeight=FontWeight.Bold, letterSpacing=2.sp)
-    Text("HOME COMMAND CENTER · v0.4", color=muted, fontSize=9.sp)
+    Text("HOME COMMAND CENTER · v0.5", color=muted, fontSize=9.sp)
    }
    Text("◉  EL", color=cyan, fontSize=13.sp)
   }
@@ -256,16 +376,19 @@ fun JohnaScreen(status: String, heard: String, history: List<Pair<String,String>
   }
   Spacer(Modifier.height(12.dp))
   NeonCard(panel, cyan) {
-   Text("ΙΣΤΟΡΙΚΟ ΣΥΝΟΜΙΛΙΑΣ", color=cyan, fontSize=12.sp, fontWeight=FontWeight.Bold)
-   if(history.isEmpty()) Text("Δεν υπάρχουν ακόμη συνομιλίες", color=muted, fontSize=11.sp)
-   history.takeLast(5).asReversed().forEach { (q,r) ->
-    Text("Εσύ: $q", color=Color.White, fontSize=12.sp)
-    Text("Johna: $r", color=Color(0xFFE2BBFF), fontSize=11.sp)
-    HorizontalDivider(color=Color(0xFF302747))
+   Row(Modifier.fillMaxWidth(), verticalAlignment=Alignment.CenterVertically, horizontalArrangement=Arrangement.SpaceBetween) {
+    Text(if (keyConfigured) "● GEMINI AI · ΣΥΝΔΕΔΕΜΕΝΟ" else "○ GEMINI AI · ΡΥΘΜΙΣΗ", color=cyan, fontSize=12.sp, fontWeight=FontWeight.Bold)
+    TextButton(onClick={ showAiSettings = !showAiSettings }) { Text("Ρυθμίσεις AI", color=cyan) }
+   }
+   if (showAiSettings) {
+    Text("Το API key αποθηκεύεται κρυπτογραφημένο στη συσκευή.", color=muted, fontSize=11.sp)
+    OutlinedTextField(value=keyDraft, onValueChange={keyDraft=it}, label={Text("Gemini API key")}, visualTransformation=PasswordVisualTransformation(), singleLine=true, modifier=Modifier.fillMaxWidth())
+    Button(onClick={ onSaveKey(keyDraft.trim()); keyDraft=""; showAiSettings=false }, enabled=keyDraft.isNotBlank()) { Text("Αποθήκευση κλειδιού") }
+    OutlinedButton(onClick=onClearHistory) { Text("Διαγραφή αποθηκευμένων συνομιλιών") }
    }
   }
   Spacer(Modifier.height(8.dp))
-  Text("AI: κανόνες · Τοπικό LLM, wake word και συνδέσεις συσκευών εκκρεμούν", color=muted, fontSize=10.sp)
+  Text("Gemini Flash · Φωνητική συνομιλία · Κρυφή τοπική μνήμη", color=muted, fontSize=10.sp)
  }
 }
 
