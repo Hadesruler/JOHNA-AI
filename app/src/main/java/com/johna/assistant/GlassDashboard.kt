@@ -41,7 +41,7 @@ private fun GlassBox(title: String, modifier: Modifier = Modifier, onExpand: () 
 }
 
 @Composable
-fun GlassDashboard(status:String, heard:String, aiResponse:String, continuous:Boolean, weather:String, weatherDetails:String,
+fun GlassDashboard(status:String, heard:String, aiResponse:String, voicePanel:String, onVoicePanelConsumed:()->Unit, continuous:Boolean, weather:String, weatherDetails:String,
  notifications:List<String>, devices:List<Pair<String,String>>, deviceScan:String, keyConfigured:Boolean,
  onWeather:()->Unit,onDiscover:()->Unit,onNotifications:()->Unit,onListen:()->Unit,onStop:()->Unit,
  onContinuous:(Boolean)->Unit,onSaveKey:(String)->Unit,onClearHistory:()->Unit,onHello:()->Unit,onTestGroq:()->Unit) {
@@ -49,6 +49,13 @@ fun GlassDashboard(status:String, heard:String, aiResponse:String, continuous:Bo
  var seconds by remember { mutableIntStateOf(0) }
  var theme by remember { mutableIntStateOf(0) }
  var settings by remember { mutableStateOf(false) }
+ LaunchedEffect(voicePanel) {
+  if (voicePanel.isNotBlank()) {
+   if (voicePanel == "settings") settings = true
+   else focused = if (voicePanel == "close") "" else voicePanel
+   onVoicePanelConsumed()
+  }
+ }
  var keyDraft by remember { mutableStateOf("") }
  var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
  LaunchedEffect(Unit) { while(true) { now=System.currentTimeMillis(); delay(1000) } }

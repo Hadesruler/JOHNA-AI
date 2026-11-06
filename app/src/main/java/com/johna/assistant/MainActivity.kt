@@ -79,6 +79,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
  private var wakeEnabled by mutableStateOf(false)
  private var lastWeatherUpdate = 0L
  private var status by mutableStateOf("Έτοιμη")
+ private var voicePanel by mutableStateOf("")
  private var aiResponse by mutableStateOf("Η απάντηση ή το σφάλμα Groq θα εμφανιστεί εδώ.")
  private var heard by mutableStateOf("Πάτησε Μίλα ή ενεργοποίησε τη συνομιλία")
  private var continuous by mutableStateOf(false)
@@ -179,7 +180,32 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
    else -> null
   }
  }
+ private fun handleVoiceCommand(words: String): Boolean {
+  val q = java.text.Normalizer.normalize(words.lowercase(Locale("el", "GR")), java.text.Normalizer.Form.NFD)
+   .replace(Regex("\\p{M}+"), "")
+  val open = listOf("ανοιξε", "δειξε", "εμφανισε", "φερε", "πηγαινε")
+  val close = listOf("κλεισε", "κρυψε", "πισω", "αρχικη")
+  if (close.any { it in q } && listOf("παραθυρο", "πανελ", "καιρο", "ρυθμισ", "πισω", "αρχικη").any { it in q }) {
+   voicePanel = "close"; status = "Το παράθυρο έκλεισε"; aiResponse = "Έκλεισα το παράθυρο."; return true
+  }
+  if (open.none { it in q }) return false
+  val panel = when {
+   "καιρ" in q || "προγνωσ" in q -> "weather"
+   "ειδοποι" in q -> "notifications"
+   "ημερολογ" in q -> "calendar"
+   "ρυθμισ" in q -> "settings"
+   "συσκευ" in q || "smart home" in q -> "devices"
+   else -> return false
+  }
+  voicePanel = panel
+  if (panel == "weather") refreshWeather()
+  if (panel == "devices") discoverDevices()
+  aiResponse = "Άνοιξα το ${when(panel) { "weather" -> "panel καιρού"; "notifications" -> "panel ειδοποιήσεων"; "calendar" -> "ημερολόγιο"; "settings" -> "μενού ρυθμίσεων"; else -> "panel συσκευών" }}."
+  status = "Εντολή συσκευής · εκτελέστηκε"
+  return true
+ }
  private fun askGroq(words: String) {
+  if (handleVoiceCommand(words)) return
   val local = localDeviceAnswer(words)
   if (local != null) { aiResponse = local; speak(local); return }
   val generation = ++requestGeneration
@@ -191,8 +217,8 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
   Thread {
    var reply = ""
    var success = false
-   var providerUsed = ""
    var diagnostic = ""
+   var providerUsed = ""
    val messages = JSONArray().put(JSONObject().put("role", "system").put("content",
     "Είσαι η JOHNA, φιλική Ελληνίδα ψηφιακή βοηθός. Απάντα φυσικά, σύντομα, στα ελληνικά. Μην επινοείς ζωντανά δεδομένα ή πρόσβαση σε συσκευές."))
    context.forEach { (q,a) ->
@@ -200,46 +226,49 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     messages.put(JSONObject().put("role","assistant").put("content",a))
    }
    messages.put(JSONObject().put("role","user").put("content",words))
-   var conn: HttpURLConnection? = null
-   try {
-    val body = JSONObject().put("model", "openai/gpt-oss-20b").put("messages", messages)
-     .put("stream", false).put("max_tokens", 300).put("temperature", 0.5)
-    conn = URL("https://api.groq.com/openai/v1/chat/completions").openConnection() as HttpURLConnection
-    conn.requestMethod = "POST"
-    conn.connectTimeout = 8000
-    conn.readTimeout = 25000
-    conn.setRequestProperty("Authorization", "Bearer $key")
-    conn.setRequestProperty("Content-Type", "application/json; charset=utf-8")
-    conn.doOutput = true
-    conn.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
-    val httpCode = conn.responseCode
-    if (httpCode in 200..299) {
-     val json = JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
-     reply = json.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")?.optString("content").orEmpty().trim()
-     if (reply.isNotBlank()) { success = true; providerUsed = "Groq" }
-     else diagnostic = "HTTP $httpCode: Κενή απάντηση μοντέλου"
-    } else {
-     diagnostic = when (httpCode) {
-      400 -> "HTTP 400: Μη αποδεκτό αίτημα ή μοντέλο"
-      401 -> "HTTP 401: Μη έγκυρο API key"
-      403 -> "HTTP 403: Δεν επιτρέπεται η πρόσβαση"
-      404 -> "HTTP 404: Δεν βρέθηκε το μοντέλο ή η υπηρεσία"
-      408 -> "HTTP 408: Έληξε ο χρόνος αναμονής"
-      413 -> "HTTP 413: Πολύ μεγάλο αίτημα"
-      429 -> "HTTP 429: Όριο χρήσης Groq"
-      in 500..599 -> "HTTP $httpCode: Προσωρινό πρόβλημα Groq"
-      else -> "HTTP $httpCode: Αποτυχία αιτήματος"
+   val models = listOf("openai/gpt-oss-20b", "openai/gpt-oss-120b")
+   for (model in models) {
+    var conn: HttpURLConnection? = null
+    try {
+     val body = JSONObject().put("model", model).put("messages", messages)
+      .put("stream", false).put("max_completion_tokens", 1200).put("temperature", 0.4)
+      .put("reasoning_effort", "low")
+     conn = URL("https://api.groq.com/openai/v1/chat/completions").openConnection() as HttpURLConnection
+     conn.requestMethod = "POST"
+     conn.connectTimeout = 6000
+     conn.readTimeout = 16000
+     conn.setRequestProperty("Authorization", "Bearer $key")
+     conn.setRequestProperty("Content-Type", "application/json; charset=utf-8")
+     conn.doOutput = true
+     conn.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
+     val httpCode = conn.responseCode
+     val raw = (if (httpCode in 200..299) conn.inputStream else conn.errorStream)
+      ?.bufferedReader()?.use { it.readText() }.orEmpty()
+     if (httpCode in 200..299) {
+      val json = JSONObject(raw)
+      val choice = json.optJSONArray("choices")?.optJSONObject(0)
+      val msg = choice?.optJSONObject("message")
+      reply = msg?.optString("content").orEmpty().trim()
+      if (reply.isBlank()) {
+       val finish = choice?.optString("finish_reason").orEmpty()
+       val reasoningTokens = json.optJSONObject("usage")?.optJSONObject("completion_tokens_details")?.optInt("reasoning_tokens", 0) ?: 0
+       diagnostic = "HTTP $httpCode: Κενή απάντηση ($model, finish=$finish, reasoning=$reasoningTokens)."
+      } else { success = true; providerUsed = model; break }
+     } else {
+      val err = try { JSONObject(raw).optJSONObject("error")?.optString("message").orEmpty() } catch (_: Exception) { "" }
+      diagnostic = "HTTP $httpCode ($model): ${err.take(180).ifBlank { "Αποτυχία αιτήματος" }}"
+      if (httpCode == 401 || httpCode == 403) break
      }
-    }
-   } catch (e: java.net.SocketTimeoutException) {
-    diagnostic = "Timeout: Η σύνδεση άργησε υπερβολικά"
-   } catch (e: java.net.UnknownHostException) {
-    diagnostic = "DNS: Δεν βρέθηκε ο διακομιστής Groq"
-   } catch (e: javax.net.ssl.SSLException) {
-    diagnostic = "SSL: Αποτυχία ασφαλούς σύνδεσης"
-   } catch (e: Exception) {
-    diagnostic = "Σφάλμα σύνδεσης: ${e.javaClass.simpleName}"
-   } finally { conn?.disconnect() }
+    } catch (e: java.net.SocketTimeoutException) {
+     diagnostic = "Timeout ($model): Δεν απάντησε εγκαίρως"
+    } catch (e: java.net.UnknownHostException) {
+     diagnostic = "DNS: Δεν βρέθηκε ο διακομιστής Groq"; break
+    } catch (e: javax.net.ssl.SSLException) {
+     diagnostic = "SSL: Αποτυχία ασφαλούς σύνδεσης"; break
+    } catch (e: Exception) {
+     diagnostic = "Σφάλμα ($model): ${e.javaClass.simpleName}"
+    } finally { conn?.disconnect() }
+   }
    if (!success) reply = "Groq: ${diagnostic.ifBlank { "Άγνωστο σφάλμα" }}"
    main.post {
     if (generation != requestGeneration || isDestroyed) return@post
@@ -271,7 +300,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
   NotificationBridge.onUpdate = { items -> main.post { notifications = items } }
   refreshWeather()
   setContent {
-   GlassDashboard(status, heard, aiResponse, continuous, weather, weatherDetails, notifications, foundDevices.toList(), deviceScan, keyConfigured,
+   GlassDashboard(status, heard, aiResponse, voicePanel, { voicePanel = "" }, continuous, weather, weatherDetails, notifications, foundDevices.toList(), deviceScan, keyConfigured,
     onWeather = { refreshWeather() },
     onDiscover = { discoverDevices() },
     onSaveKey = { saveKey(it) },

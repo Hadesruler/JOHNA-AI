@@ -1,0 +1,1 @@
+JOHNA AI v1.0.3: Voice panel navigation (weather, notifications, calendar, settings, devices, close), Groq fallback 20b -> 120b, HTTP 200 empty-content diagnostics including finish_reason/reasoning tokens, max_completion_tokens 1200. Existing encrypted Groq key retained on update. Build via GitHub Actions.
