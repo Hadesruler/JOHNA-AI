@@ -13,6 +13,23 @@ android {
   versionCode = 109
   versionName = "1.0.9"
  }
+ // Stable debug signing for CI. Never commit a keystore or passwords.
+ val keystorePath = System.getenv("JOHNA_KEYSTORE_PATH")
+ val keystorePassword = System.getenv("JOHNA_SIGNING_PASSWORD")
+ if (!keystorePath.isNullOrBlank() && !keystorePassword.isNullOrBlank()) {
+  signingConfigs {
+   create("johnaCi") {
+    storeFile = file(keystorePath)
+    storePassword = keystorePassword
+    keyAlias = "johna"
+    keyPassword = keystorePassword
+    storeType = "pkcs12"
+   }
+  }
+  buildTypes {
+   getByName("debug") { signingConfig = signingConfigs.getByName("johnaCi") }
+  }
+ }
  buildFeatures { compose = true }
  compileOptions {
   sourceCompatibility = JavaVersion.VERSION_17
