@@ -1,11 +1,18 @@
-# JOHNA AI v0.1 — Android prototype
+# JOHNA AI v0.2
 
-Prototype for Redmi Pad 2. Purple/magenta orb, tap-to-talk Greek speech recognition and Greek text-to-speech (installed Android voice permitting). It is NOT yet always-on, an LLM assistant, or a smart-home controller.
+Android Kotlin/Jetpack Compose prototype for Redmi Pad 2.
 
-## Build APK using GitHub Actions (no PC required)
-1. Create a new GitHub repository and upload the *contents* of this folder (including `.github/workflows/build-apk.yml`) to its root. GitHub mobile web file upload may hide dot-folders; use the repository's web editor or a Git client if necessary.
-2. Open **Actions** > **Build JOHNA Android APK** > **Run workflow** (or push to main).
-3. Wait for the build to succeed; download artifact **JOHNA_AI_v0.1_debug_APK** from the run summary.
-4. Extract the artifact ZIP and install `app-debug.apk` on the Android tablet. Allow installation from that source when Android asks.
+## Working features
+- Google SpeechRecognizer in Greek with partial transcription.
+- Greek Android text-to-speech.
+- Animated purple orb and dashboard with explicit integration status.
+- Conversation history in current session.
+- Optional automatic re-listening after TTS finishes, while app remains in foreground; error retry capped at 3.
+- Manual microphone and stop controls.
 
-This project has not been compiled or device-tested in this environment. Check Actions build logs if it fails. Debug APK is automatically signed for testing, not production distribution.
+## Not yet implemented
+- Local LLM (Qwen), native inference library and GGUF model installation.
+- Local wake word ("Hey Johna") and background foreground service.
+- TV, Bambu A1, smart home and web integrations.
+
+Google speech recognition may require internet and does not incur an OpenAI API charge. Continuous listening in the foreground is not equivalent to an always-on wake word and may capture TV audio. Test with headphones or low TV volume. History is not saved across app restarts.
