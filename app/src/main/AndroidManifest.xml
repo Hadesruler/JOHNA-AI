@@ -3,8 +3,36 @@
  <uses-permission android:name="android.permission.INTERNET"/>
  <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
  <uses-permission android:name="android.permission.ACCESS_WIFI_STATE"/>
- <queries><package android:name="com.google.android.gm"/><package android:name="com.android.chrome"/><intent><action android:name="android.speech.RecognitionService"/></intent><intent><action android:name="android.intent.action.TTS_SERVICE"/></intent></queries>
- <application android:label="JOHNA AI" android:theme="@android:style/Theme.Material.NoActionBar" android:usesCleartextTraffic="true">
-  <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="landscape"><intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter></activity>
+ <uses-permission android:name="android.permission.GET_ACCOUNTS"/>
+ <queries>
+  <package android:name="com.google.android.gm"/>
+  <package android:name="com.android.chrome"/>
+  <package android:name="com.google.android.googlequicksearchbox"/>
+  <intent><action android:name="android.speech.RecognitionService"/></intent>
+  <intent><action android:name="android.intent.action.TTS_SERVICE"/></intent>
+ </queries>
+ <application
+  android:label="JOHNA AI"
+  android:icon="@drawable/johna_ai"
+  android:theme="@android:style/Theme.Material.NoActionBar"
+  android:usesCleartextTraffic="true">
+  <activity
+   android:name=".MainActivity"
+   android:exported="true"
+   android:screenOrientation="landscape">
+   <intent-filter>
+    <action android:name="android.intent.action.MAIN"/>
+    <category android:name="android.intent.category.LAUNCHER"/>
+   </intent-filter>
+  </activity>
+  <!-- CRITICAL: NotificationListenerService must be declared or it never receives notifications -->
+  <service
+   android:name=".JohnaNotificationListener"
+   android:exported="false"
+   android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+   <intent-filter>
+    <action android:name="android.service.notification.NotificationListenerService"/>
+   </intent-filter>
+  </service>
  </application>
 </manifest>
