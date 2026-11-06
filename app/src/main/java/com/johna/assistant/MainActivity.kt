@@ -190,6 +190,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
    var reply = ""
    var success = false
    var providerUsed = ""
+   var diagnostic = ""
    val messages = JSONArray().put(JSONObject().put("role", "system").put("content",
     "Είσαι η JOHNA, φιλική Ελληνίδα ψηφιακή βοηθός. Απάντα φυσικά, σύντομα, στα ελληνικά. Μην επινοείς ζωντανά δεδομένα ή πρόσβαση σε συσκευές."))
    context.forEach { (q,a) ->
@@ -209,14 +210,35 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     conn.setRequestProperty("Content-Type", "application/json; charset=utf-8")
     conn.doOutput = true
     conn.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
-    if (conn.responseCode in 200..299) {
+    val httpCode = conn.responseCode
+    if (httpCode in 200..299) {
      val json = JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
      reply = json.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")?.optString("content").orEmpty().trim()
      if (reply.isNotBlank()) { success = true; providerUsed = "Groq" }
+     else diagnostic = "HTTP $httpCode: Κενή απάντηση μοντέλου"
+    } else {
+     diagnostic = when (httpCode) {
+      400 -> "HTTP 400: Μη αποδεκτό αίτημα ή μοντέλο"
+      401 -> "HTTP 401: Μη έγκυρο API key"
+      403 -> "HTTP 403: Δεν επιτρέπεται η πρόσβαση"
+      404 -> "HTTP 404: Δεν βρέθηκε το μοντέλο ή η υπηρεσία"
+      408 -> "HTTP 408: Έληξε ο χρόνος αναμονής"
+      413 -> "HTTP 413: Πολύ μεγάλο αίτημα"
+      429 -> "HTTP 429: Όριο χρήσης Groq"
+      in 500..599 -> "HTTP $httpCode: Προσωρινό πρόβλημα Groq"
+      else -> "HTTP $httpCode: Αποτυχία αιτήματος"
+     }
     }
-   } catch (_: Exception) { /* Network error */ }
-   finally { conn?.disconnect() }
-   if (!success) reply = "Το Groq δεν απάντησε. Έλεγξε το API key, το δωρεάν όριο και τη σύνδεση."
+   } catch (e: java.net.SocketTimeoutException) {
+    diagnostic = "Timeout: Η σύνδεση άργησε υπερβολικά"
+   } catch (e: java.net.UnknownHostException) {
+    diagnostic = "DNS: Δεν βρέθηκε ο διακομιστής Groq"
+   } catch (e: javax.net.ssl.SSLException) {
+    diagnostic = "SSL: Αποτυχία ασφαλούς σύνδεσης"
+   } catch (e: Exception) {
+    diagnostic = "Σφάλμα σύνδεσης: ${e.javaClass.simpleName}"
+   } finally { conn?.disconnect() }
+   if (!success) reply = "Groq: ${diagnostic.ifBlank { "Άγνωστο σφάλμα" }}"
    main.post {
     if (generation != requestGeneration || isDestroyed) return@post
     if (success) {
