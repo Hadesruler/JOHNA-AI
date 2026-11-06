@@ -1,18 +1,9 @@
-# JOHNA AI v0.2
+# JOHNA AI v0.4 — Futuristic Dashboard
 
-Android Kotlin/Jetpack Compose prototype for Redmi Pad 2.
+Neon magenta/cyan Compose dashboard with animated central audio waveform orb (no avatar), responsive tablet layout, live Open-Meteo Athens weather, Android notification access, agent status panels, device placeholders, calendar, conversation history, and existing Google Greek speech/TTS.
 
-## Working features
-- Google SpeechRecognizer in Greek with partial transcription.
-- Greek Android text-to-speech.
-- Animated purple orb and dashboard with explicit integration status.
-- Conversation history in current session.
-- Optional automatic re-listening after TTS finishes, while app remains in foreground; error retry capped at 3.
-- Manual microphone and stop controls.
+## Limitations
+This is an Android source project, not a prebuilt APK. Not compiled/tested in this environment. AI agent tiles are informational, not connected autonomous agents. Local LLM and 'Hey Johna' wake-word detection are not implemented. Device connection tiles are placeholders. The calendar is a simple day grid, not linked to Google Calendar.
 
-## Not yet implemented
-- Local LLM (Qwen), native inference library and GGUF model installation.
-- Local wake word ("Hey Johna") and background foreground service.
-- TV, Bambu A1, smart home and web integrations.
-
-Google speech recognition may require internet and does not incur an OpenAI API charge. Continuous listening in the foreground is not equivalent to an always-on wake word and may capture TV audio. Test with headphones or low TV volume. History is not saved across app restarts.
+## Build
+Push project to GitHub and use `.github/workflows/build-apk.yml` to build debug APK; check Actions logs and artifacts.
