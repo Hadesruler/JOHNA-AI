@@ -131,7 +131,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
   val generation = ++requestGeneration
   val context = history.takeLast(8).toList()
   Thread {
-   var reply: String
+   var reply: String = ""
    var success = false
    try {
     val contents = JSONArray()
