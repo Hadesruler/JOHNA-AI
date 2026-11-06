@@ -131,7 +131,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
    cipher.init(Cipher.ENCRYPT_MODE, cipherKey())
    val payload = Base64.encodeToString(cipher.iv + cipher.doFinal(value.toByteArray(Charsets.UTF_8)), Base64.NO_WRAP)
    getSharedPreferences("johna_secure", MODE_PRIVATE).edit().putString("key", payload).apply()
-   apiKey = value; keyConfigured = true; status = "Gemini AI συνδεδεμένο"
+   apiKey = value; keyConfigured = true; status = "JOHNA Cloud AI"
   } catch (_: Exception) { status = "Αποτυχία αποθήκευσης κλειδιού" }
  }
  private fun loadKey(): String {
@@ -179,80 +179,48 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
   }
  }
  private fun askGemini(words: String) {
-  val key = apiKey
-  if (key.isBlank()) { speak("Άνοιξε τις ρυθμίσεις AI και αποθήκευσε το Gemini API key."); return }
   val local = localDeviceAnswer(words)
   if (local != null) { speak(local); return }
-  status = "Σκέφτομαι..."
   val generation = ++requestGeneration
-  val context = history.takeLast(8).toList()
+  val context = history.takeLast(6).toList()
+  val key = apiKey.trim()
+  if (key.isBlank() || key.startsWith("{")) { speak("Πρόσθεσε το Groq API key στις Ρυθμίσεις AI."); return }
+  status = "JOHNA Cloud AI · σύνδεση..."
   Thread {
-   var reply: String = ""
+   var reply = ""
    var success = false
+   var providerUsed = ""
+   val messages = JSONArray().put(JSONObject().put("role", "system").put("content",
+    "Είσαι η JOHNA, φιλική Ελληνίδα ψηφιακή βοηθός. Απάντα φυσικά, σύντομα, στα ελληνικά. Μην επινοείς ζωντανά δεδομένα ή πρόσβαση σε συσκευές."))
+   context.forEach { (q,a) ->
+    messages.put(JSONObject().put("role","user").put("content",q))
+    messages.put(JSONObject().put("role","assistant").put("content",a))
+   }
+   messages.put(JSONObject().put("role","user").put("content",words))
+   var conn: HttpURLConnection? = null
    try {
-    val contents = JSONArray()
-    context.forEach { (q,r) ->
-     contents.put(JSONObject().put("role","user").put("parts",JSONArray().put(JSONObject().put("text",q))))
-     contents.put(JSONObject().put("role","model").put("parts",JSONArray().put(JSONObject().put("text",r))))
+    val body = JSONObject().put("model", "llama-3.3-70b-versatile").put("messages", messages)
+     .put("stream", false).put("max_tokens", 300).put("temperature", 0.5)
+    conn = URL("https://api.groq.com/openai/v1/chat/completions").openConnection() as HttpURLConnection
+    conn.requestMethod = "POST"
+    conn.connectTimeout = 8000
+    conn.readTimeout = 25000
+    conn.setRequestProperty("Authorization", "Bearer $key")
+    conn.setRequestProperty("Content-Type", "application/json; charset=utf-8")
+    conn.doOutput = true
+    conn.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
+    if (conn.responseCode in 200..299) {
+     val json = JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
+     reply = json.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")?.optString("content").orEmpty().trim()
+     if (reply.isNotBlank()) { success = true; providerUsed = "Groq" }
     }
-    contents.put(JSONObject().put("role","user").put("parts",JSONArray().put(JSONObject().put("text",words))))
-    val body = JSONObject()
-     .put("systemInstruction",JSONObject().put("parts",JSONArray().put(JSONObject().put("text",
-      "Είσαι η JOHNA, φιλική έξυπνη φωνητική βοηθός. Απάντησε στα ελληνικά, φυσικά και σύντομα (συνήθως 1-3 προτάσεις). Μην ισχυρίζεσαι ότι χειρίζεσαι συσκευές αν δεν έχεις πρόσβαση."))))
-     .put("contents",contents)
-     .put("generationConfig",JSONObject().put("maxOutputTokens",400))
-    // Retry transient failures, then switch to a lighter available model.
-    val models = listOf("gemini-3.1-flash-lite", "gemini-3.8-flash")
-    var lastCode = 0
-    var lastMessage = ""
-    var finished = false
-    for (model in models) {
-     if (finished) break
-     for (attempt in 0..0) {
-      val conn = URL("https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent").openConnection() as HttpURLConnection
-      try {
-       conn.requestMethod = "POST"; conn.connectTimeout = 4000; conn.readTimeout = 8000
-       conn.setRequestProperty("Content-Type", "application/json; charset=utf-8")
-       conn.setRequestProperty("x-goog-api-key", key)
-       conn.doOutput = true
-       conn.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
-       val code = conn.responseCode
-       lastCode = code
-       if (code in 200..299) {
-        val json = JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
-        val candidates = json.optJSONArray("candidates")
-        val parts = candidates?.optJSONObject(0)?.optJSONObject("content")?.optJSONArray("parts")
-        val answer = if (parts == null) "" else (0 until parts.length()).mapNotNull { i ->
-         parts.optJSONObject(i)?.optString("text")?.takeIf { it.isNotBlank() }
-        }.joinToString(" ").trim()
-        if (answer.isNotBlank()) { reply = answer; success = true; finished = true; break }
-        lastMessage = "Κενή απάντηση από το μοντέλο"
-       } else {
-        val errorText = (conn.errorStream?.bufferedReader()?.use { it.readText() } ?: "")
-        lastMessage = try { JSONObject(errorText).optJSONObject("error")?.optString("message") ?: "" } catch (_: Exception) { "" }
-        // Invalid credentials or malformed request cannot be fixed by switching models.
-        if (code == 400 || code == 401 || code == 403) { finished = true; break }
-        // For 404, 429, 503 and other server errors, try the next model.
-       }
-      } catch (_: java.io.IOException) {
-       lastMessage = "Πρόβλημα δικτύου"
-      } finally { conn.disconnect() }
-      if (attempt == 0 && !finished) Thread.sleep(800)
-     }
-    }
-    if (!success) {
-     reply = when (lastCode) {
-      401, 403 -> "Το Gemini API key δεν έχει πρόσβαση. Έλεγξε τις ρυθμίσεις AI."
-      400 -> "Το Gemini απέρριψε το αίτημα. Χρειάζεται έλεγχος ρυθμίσεων."
-      429 -> "Το δωρεάν όριο AI εξαντλήθηκε προσωρινά. Δοκίμασε αργότερα."
-      503 -> "Τα μοντέλα AI είναι προσωρινά απασχολημένα. Δοκίμασε σε λίγο."
-      else -> "Δεν πήρα απάντηση από το AI. ${if (lastCode != 0) "Κωδικός $lastCode" else lastMessage}."
-     }
-    }
-   } catch (_: Exception) { reply = "Δεν μπόρεσα να συνδεθώ με το Gemini. Έλεγξε το Internet." }
+   } catch (_: Exception) { /* Network error */ }
+   finally { conn?.disconnect() }
+   if (!success) reply = "Το Groq δεν απάντησε. Έλεγξε το API key, το δωρεάν όριο και τη σύνδεση."
    main.post {
     if (generation != requestGeneration || isDestroyed) return@post
     if (success) {
+     status = "JOHNA AI · $providerUsed"
      history.add(words to reply)
      while (history.size > 20) history.removeAt(0)
      persistHistory()
@@ -396,7 +364,7 @@ fun JohnaScreen(status: String, heard: String, continuous: Boolean,
  var themeIndex by remember { mutableIntStateOf(prefs.getInt("theme",0)) }
  var showThemes by remember { mutableStateOf(false) }
  val themes = listOf("Cyber Purple", "Midnight Blue", "Arctic White", "Amber Tech")
- var keyDraft by remember { mutableStateOf("") }
+ var groqDraft by remember { mutableStateOf("") }
  val bg = listOf(Color(0xFF080717),Color(0xFF061323),Color(0xFFE6EDF4),Color(0xFF110E09))[themeIndex]
  val panel = listOf(Color(0xFF15122B),Color(0xFF10253A),Color(0xFF263A53),Color(0xFF241C13))[themeIndex]
  val purple = listOf(Color(0xFFB13CFF),Color(0xFF4A8BFF),Color(0xFF4C71D5),Color(0xFFFFA32B))[themeIndex]
@@ -476,18 +444,19 @@ fun JohnaScreen(status: String, heard: String, continuous: Boolean,
   Spacer(Modifier.height(12.dp))
   NeonCard(panel, cyan) {
    Row(Modifier.fillMaxWidth(), verticalAlignment=Alignment.CenterVertically, horizontalArrangement=Arrangement.SpaceBetween) {
-    Text(if (keyConfigured) "● GEMINI AI · ΣΥΝΔΕΔΕΜΕΝΟ" else "○ GEMINI AI · ΡΥΘΜΙΣΗ", color=cyan, fontSize=12.sp, fontWeight=FontWeight.Bold)
+    Text(if (keyConfigured) "● CLOUD AI · ΡΥΘΜΙΣΜΕΝΟ" else "○ CLOUD AI · ΡΥΘΜΙΣΗ", color=cyan, fontSize=12.sp, fontWeight=FontWeight.Bold)
     TextButton(onClick={ showAiSettings = !showAiSettings }) { Text("Ρυθμίσεις AI", color=cyan) }
    }
    if (showAiSettings) {
     Text("Το API key αποθηκεύεται κρυπτογραφημένο στη συσκευή.", color=muted, fontSize=11.sp)
-    OutlinedTextField(value=keyDraft, onValueChange={keyDraft=it}, label={Text("Gemini API key")}, visualTransformation=PasswordVisualTransformation(), singleLine=true, modifier=Modifier.fillMaxWidth())
-    Button(onClick={ onSaveKey(keyDraft.trim()); keyDraft=""; showAiSettings=false }, enabled=keyDraft.isNotBlank()) { Text("Αποθήκευση κλειδιού") }
+    Text("Μόνο Groq Cloud AI · δωρεάν χρήση με όρια", color=muted, fontSize=11.sp)
+    OutlinedTextField(value=groqDraft, onValueChange={groqDraft=it}, label={Text("Groq API key")}, visualTransformation=PasswordVisualTransformation(), singleLine=true, modifier=Modifier.fillMaxWidth())
+    Button(onClick={ onSaveKey(groqDraft.trim()); groqDraft=""; showAiSettings=false }, enabled=groqDraft.isNotBlank()) { Text("Αποθήκευση Groq key") }
     OutlinedButton(onClick=onClearHistory) { Text("Διαγραφή αποθηκευμένων συνομιλιών") }
    }
   }
   Spacer(Modifier.height(8.dp))
-  Text("Gemini Flash-Lite · Φωνή · Ιδιωτική μνήμη · Smart Home", color=muted, fontSize=10.sp)
+  Text("Groq Cloud AI · Ελληνική φωνή · Smart Home", color=muted, fontSize=10.sp)
  }
  if(showThemes) AlertDialog(onDismissRequest={showThemes=false}, title={Text("JOHNA THEMES")},
   text={Column(verticalArrangement=Arrangement.spacedBy(8.dp)) {
