@@ -212,7 +212,8 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
      status = "Gmail: ${msgs.size} μηνύματα · ${events.size} ραντεβού"
     }
    } catch (e: UserRecoverableAuthException) {
-    main.post { googleAuthLauncher.launch(e.intent) }
+    val recoverIntent = e.intent ?: return@Thread
+    main.post { googleAuthLauncher.launch(recoverIntent) }
    } catch (e: Exception) {
     main.post { status = "Google: ${e.javaClass.simpleName}" }
    }
