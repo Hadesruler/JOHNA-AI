@@ -1,0 +1,1 @@
+JOHNA v0.8 Glass Dashboard source. Landscape UI, generated scenic background, orb art, glass panels, expanded widgets, theme cycle, native time, existing Gemini/TTS/NSD. Build not tested in this environment. Wake word, OAuth, full smart home control, Live API not implemented. No API keys included. Install over existing package without clearing data to preserve encrypted key.

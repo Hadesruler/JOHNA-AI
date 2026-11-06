@@ -60,6 +60,8 @@ import androidx.compose.ui.unit.sp
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.delay
+import java.util.TimeZone
 
 class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
  private val main = Handler(Looper.getMainLooper())
@@ -158,9 +160,29 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
   } catch (_: Exception) {}
  }
  private fun clearHistory() { history.clear(); conversationFile.delete(); status = "Η μνήμη διαγράφηκε" }
+ private fun localDeviceAnswer(words: String): String? {
+  val q = words.lowercase(Locale("el", "GR"))
+  val now = Date()
+  val greek = Locale("el", "GR")
+  return when {
+   "τι ώρα" in q || "την ώρα" in q || "ώρα είναι" in q || "πες μου ώρα" in q -> {
+    val fmt = SimpleDateFormat("HH:mm", greek)
+    fmt.timeZone = TimeZone.getDefault()
+    "Η ώρα είναι ${fmt.format(now)}."
+   }
+   "τι ημερομηνία" in q || "τι μέρα" in q || "ποια μέρα" in q || "σημερινή ημερομηνία" in q -> {
+    val fmt = SimpleDateFormat("EEEE d MMMM yyyy", greek)
+    fmt.timeZone = TimeZone.getDefault()
+    "Σήμερα είναι ${fmt.format(now)}."
+   }
+   else -> null
+  }
+ }
  private fun askGemini(words: String) {
   val key = apiKey
   if (key.isBlank()) { speak("Άνοιξε τις ρυθμίσεις AI και αποθήκευσε το Gemini API key."); return }
+  val local = localDeviceAnswer(words)
+  if (local != null) { speak(local); return }
   status = "Σκέφτομαι..."
   val generation = ++requestGeneration
   val context = history.takeLast(8).toList()
@@ -256,13 +278,12 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
   NotificationBridge.onUpdate = { items -> main.post { notifications = items } }
   refreshWeather()
   setContent {
-   JohnaScreen(status, heard, continuous, weather, weatherDetails, notifications, agentInfo, wakeEnabled, keyConfigured, foundDevices.toList(), deviceScan,
+   GlassDashboard(status, heard, continuous, weather, weatherDetails, notifications, foundDevices.toList(), deviceScan, keyConfigured,
     onWeather = { refreshWeather() },
     onDiscover = { discoverDevices() },
     onSaveKey = { saveKey(it) },
     onClearHistory = { clearHistory() },
     onNotifications = { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) },
-    onWake = { wakeEnabled = it; agentInfo = if (it) "Hey Johna: απαιτείται wake-word engine · μη ενεργό" else "Wake word απενεργοποιημένο" },
     onContinuous = { enabled -> continuous = enabled; if (enabled) { active = true; requestListen() } else stopConversation() },
     onListen = { active = true; requestListen() },
     onStop = { stopConversation() },
@@ -382,8 +403,12 @@ fun JohnaScreen(status: String, heard: String, continuous: Boolean,
  val cyan = listOf(Color(0xFF18D8FF),Color(0xFF37D6F5),Color(0xFF2C91B8),Color(0xFFFFCB65))[themeIndex]
  val muted = Color(0xFFADA5CC)
  val narrow = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp < 650
- val clock = remember { SimpleDateFormat("HH:mm", Locale("el", "GR")).format(Date()) }
- val date = remember { SimpleDateFormat("EEE, d MMM yyyy", Locale("el", "GR")).format(Date()) }
+ var currentTime by remember { mutableLongStateOf(System.currentTimeMillis()) }
+ LaunchedEffect(Unit) {
+  while (true) { currentTime = System.currentTimeMillis(); delay(1000L) }
+ }
+ val clock = remember(currentTime) { SimpleDateFormat("HH:mm", Locale("el", "GR")).format(Date(currentTime)) }
+ val date = remember(currentTime) { SimpleDateFormat("EEE, d MMM yyyy", Locale("el", "GR")).format(Date(currentTime)) }
  val pulse by rememberInfiniteTransition(label="neon").animateFloat(.78f, 1f, infiniteRepeatable(tween(1800), RepeatMode.Reverse), label="pulse")
  Column(Modifier.fillMaxSize().background(bg).verticalScroll(rememberScrollState()).padding(12.dp)) {
   Row(Modifier.fillMaxWidth(), verticalAlignment=Alignment.CenterVertically, horizontalArrangement=Arrangement.SpaceBetween) {

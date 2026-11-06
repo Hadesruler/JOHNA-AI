@@ -1,0 +1,1 @@
+JOHNA v0.7.1 targeted time fix. Uses Android device clock and timezone for spoken time/date; refreshes dashboard clock each second. GUI unchanged. Not compiled/tested. Install over same package without clearing data to preserve encrypted API key.
