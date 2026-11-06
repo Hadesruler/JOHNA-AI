@@ -145,7 +145,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
       "Είσαι η JOHNA, φιλική έξυπνη φωνητική βοηθός. Απάντησε στα ελληνικά, φυσικά και σύντομα (συνήθως 1-3 προτάσεις). Μην ισχυρίζεσαι ότι χειρίζεσαι συσκευές αν δεν έχεις πρόσβαση."))))
      .put("contents",contents)
      .put("generationConfig",JSONObject().put("maxOutputTokens",400))
-    val conn = URL("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent").openConnection() as HttpURLConnection
+    val conn = URL("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent").openConnection() as HttpURLConnection
     try {
      conn.requestMethod = "POST"; conn.connectTimeout = 10000; conn.readTimeout = 25000
      conn.setRequestProperty("Content-Type","application/json")
