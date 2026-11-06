@@ -87,6 +87,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
  private var apiKey by mutableStateOf("")
  private var keyConfigured by mutableStateOf(false)
  private var requestGeneration = 0
+ private var aiPending = false
  private var deviceScan by mutableStateOf("Πάτησε Αναζήτηση για συσκευές Wi-Fi")
  private val foundDevices = mutableStateListOf<Pair<String,String>>()
  private val discoveries = mutableListOf<NsdManager.DiscoveryListener>()
@@ -183,14 +184,16 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
  private fun handleVoiceCommand(words: String): Boolean {
   val q = java.text.Normalizer.normalize(words.lowercase(Locale("el", "GR")), java.text.Normalizer.Form.NFD)
    .replace(Regex("\\p{M}+"), "")
-  val open = listOf("ανοιξε", "δειξε", "εμφανισε", "φερε", "πηγαινε")
-  val close = listOf("κλεισε", "κρυψε", "πισω", "αρχικη")
-  if (close.any { it in q } && listOf("παραθυρο", "πανελ", "καιρο", "ρυθμισ", "πισω", "αρχικη").any { it in q }) {
+  val open = listOf("ανοιξε", "δειξε", "εμφανισε", "φερε", "πηγαινε", "ανοιγμα", "θελω να δω")
+  val close = listOf("κλεισε", "κρυψε", "πισω", "αρχικη", "επιστροφη", "γυρνα")
+  val standaloneClose = q.trim() in listOf("κλεισε", "κλειστο", "πισω", "αρχικη", "αρχικη οθονη", "κλεισε τα ολα", "κλεισε ολα", "κλεισε ολα τα πανελ", "κλεισε το", "γυρνα πισω", "επιστροφη", "πισω στην αρχικη")
+  val closeTarget = listOf("παραθυρο", "πανελ", "καιρ", "ρυθμισ", "ειδοποι", "ημερολογ", "συσκευ", "μενου", "ολα", "οθονη", "πισω", "αρχικη")
+  if (standaloneClose || (close.any { it in q } && closeTarget.any { it in q })) {
    voicePanel = "close"; status = "Το παράθυρο έκλεισε"; aiResponse = "Έκλεισα το παράθυρο."; return true
   }
   if (open.none { it in q }) return false
   val panel = when {
-   "καιρ" in q || "προγνωσ" in q -> "weather"
+   "καιρ" in q || "προγνωσ" in q || "θερμοκρασ" in q -> "weather"
    "ειδοποι" in q -> "notifications"
    "ημερολογ" in q -> "calendar"
    "ρυθμισ" in q -> "settings"
@@ -204,14 +207,32 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
   status = "Εντολή συσκευής · εκτελέστηκε"
   return true
  }
+ private fun isWeatherQuestion(words: String): Boolean {
+  val q = java.text.Normalizer.normalize(words.lowercase(Locale("el", "GR")), java.text.Normalizer.Form.NFD)
+   .replace(Regex("\\p{M}+"), "")
+  return listOf("καιρ", "θερμοκρασ", "προγνωσ", "βρεχ", "υγρασι", "ανεμο").any { it in q }
+ }
+ private fun answerWeather() {
+  voicePanel = "weather"
+  status = "Καιρός · λήψη ζωντανών δεδομένων..."
+  aiResponse = "Ενημερώνω τον καιρό από Open-Meteo..."
+  refreshWeather { result ->
+   aiResponse = result
+   status = "Καιρός · ενημερώθηκε"
+   speak(result)
+  }
+ }
  private fun askGroq(words: String) {
   if (handleVoiceCommand(words)) return
+  if (isWeatherQuestion(words)) { answerWeather(); return }
+  if (aiPending) { status = "Groq · περιμένω την προηγούμενη απάντηση"; return }
   val local = localDeviceAnswer(words)
   if (local != null) { aiResponse = local; speak(local); return }
   val generation = ++requestGeneration
-  val context = history.takeLast(6).toList()
+  aiPending = true
+  val context = history.takeLast(2).toList()
   val key = apiKey.trim()
-  if (key.isBlank() || key.startsWith("{")) { aiResponse = "Πρόσθεσε το Groq API key στις Ρυθμίσεις AI."; status = "Λείπει το API key"; speak(aiResponse); return }
+  if (key.isBlank() || key.startsWith("{")) { aiPending = false; aiResponse = "Πρόσθεσε το Groq API key στις Ρυθμίσεις AI."; status = "Λείπει το API key"; speak(aiResponse); return }
   status = "Groq · αποστολή αιτήματος..."
   aiResponse = "Αποστολή στο Groq..."
   Thread {
@@ -226,17 +247,18 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     messages.put(JSONObject().put("role","assistant").put("content",a))
    }
    messages.put(JSONObject().put("role","user").put("content",words))
-   val models = listOf("openai/gpt-oss-20b", "openai/gpt-oss-120b")
+   val models = listOf("openai/gpt-oss-20b", "qwen/qwen3-32b", "openai/gpt-oss-120b")
    for (model in models) {
     var conn: HttpURLConnection? = null
     try {
      val body = JSONObject().put("model", model).put("messages", messages)
-      .put("stream", false).put("max_completion_tokens", 1200).put("temperature", 0.4)
-      .put("reasoning_effort", "low")
+      .put("stream", false).put("max_completion_tokens", 160).put("temperature", 0.2)
+     if (model.startsWith("openai/gpt-oss")) body.put("reasoning_effort", "low")
+     if (model.startsWith("qwen/")) body.put("reasoning_effort", "none")
      conn = URL("https://api.groq.com/openai/v1/chat/completions").openConnection() as HttpURLConnection
      conn.requestMethod = "POST"
-     conn.connectTimeout = 6000
-     conn.readTimeout = 16000
+     conn.connectTimeout = 2500
+     conn.readTimeout = 6000
      conn.setRequestProperty("Authorization", "Bearer $key")
      conn.setRequestProperty("Content-Type", "application/json; charset=utf-8")
      conn.doOutput = true
@@ -272,6 +294,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
    if (!success) reply = "Groq: ${diagnostic.ifBlank { "Άγνωστο σφάλμα" }}"
    main.post {
     if (generation != requestGeneration || isDestroyed) return@post
+    aiPending = false
     aiResponse = reply
     status = if (success) "JOHNA AI · $providerUsed · απάντησε" else "Groq · αποτυχία"
     if (success) {
@@ -294,7 +317,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
   tts = TextToSpeech(this, this)
   tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
    override fun onStart(utteranceId: String?) { main.post { speaking = true } }
-   override fun onDone(utteranceId: String?) { main.post { speaking = false; if (active && continuous) main.postDelayed({ beginListening() }, 450) else if (status == "Μιλάω") status = "Έτοιμη" } }
+   override fun onDone(utteranceId: String?) { main.post { speaking = false; if (active && continuous && !aiPending) main.postDelayed({ beginListening() }, 450) else if (status == "Μιλάω") status = "Έτοιμη" } }
    override fun onError(utteranceId: String?) { main.post { speaking = false; if (!status.startsWith("Groq")) status = "Σφάλμα φωνής" } }
   })
   NotificationBridge.onUpdate = { items -> main.post { notifications = items } }
@@ -321,7 +344,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
   } else status = "Η υπηρεσία φωνής δεν ξεκίνησε"
  }
  private fun stopConversation() {
-  requestGeneration++; active = false; continuous = false; listening = false
+  requestGeneration++; aiPending = false; active = false; continuous = false; listening = false
   recognizer?.cancel(); recognizer?.destroy(); recognizer = null
   tts?.stop(); speaking = false; status = "Σταμάτησε"
  }
@@ -330,7 +353,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
   else permission.launch(Manifest.permission.RECORD_AUDIO)
  }
  private fun speak(text: String) {
-  if (!ttsReady) { speaking = false; return }
+  if (!ttsReady) { speaking = false; if (active && continuous && !aiPending) main.postDelayed({ beginListening() }, 450); return }
   speaking = true
   tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "johna_${System.currentTimeMillis()}")
  }
@@ -357,12 +380,12 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
      listening = false; errors = 0
      val words = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty().trim()
      if (words.isBlank()) { if (active && continuous) main.postDelayed({ beginListening() }, 600); return }
-     heard = words
+     heard = ""
      askGroq(words)
     }
     override fun onPartialResults(partialResults: Bundle?) {
      val partial = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
-     if (!partial.isNullOrBlank()) heard = partial
+     // Keep live transcription hidden; recognition still runs.
     }
     override fun onEvent(eventType: Int, params: Bundle?) {}
    })
@@ -377,18 +400,39 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
    try { sr.startListening(intent) } catch (e: Exception) { listening = false; active = false; status = "Αδυναμία εκκίνησης μικροφώνου" }
   }
  }
- private fun refreshWeather() {
+ private fun refreshWeather(onAnswer: ((String) -> Unit)? = null) {
   weather = "Ενημέρωση..."
   Thread {
    try {
-    val conn = URL("https://api.open-meteo.com/v1/forecast?latitude=37.9838&longitude=23.7275&current=temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m&timezone=Europe%2FAthens").openConnection()
-    conn.connectTimeout = 6500; conn.readTimeout = 6500
+    val url = "https://api.open-meteo.com/v1/forecast?latitude=37.9838&longitude=23.7275&current=temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m&timezone=Europe%2FAthens"
+    val conn = URL(url).openConnection()
+    conn.connectTimeout = 4000; conn.readTimeout = 5000
     val data = JSONObject(conn.getInputStream().bufferedReader().use { it.readText() }).getJSONObject("current")
     val t = data.getDouble("temperature_2m").toInt()
     val h = data.getInt("relative_humidity_2m")
     val w = data.getDouble("wind_speed_10m").toInt()
-    main.post { weather = "$t°C"; weatherDetails = "Αθήνα · Υγρασία $h% · Άνεμος $w km/h"; lastWeatherUpdate = System.currentTimeMillis() }
-   } catch (_: Exception) { main.post { weather = "Χωρίς δεδομένα"; weatherDetails = "Έλεγξε τη σύνδεση · Ανανέωση" } }
+    val code = data.getInt("weather_code")
+    val condition = when (code) {
+     0 -> "αίθριος"; 1, 2 -> "λίγες νεφώσεις"; 3 -> "συννεφιά"
+     45, 48 -> "ομίχλη"; 51, 53, 55, 56, 57 -> "ψιχάλες"
+     61, 63, 65, 66, 67, 80, 81, 82 -> "βροχή"
+     71, 73, 75, 77, 85, 86 -> "χιόνι"; 95, 96, 99 -> "καταιγίδα"
+     else -> "μεταβλητός καιρός"
+    }
+    val answer = "Αυτή τη στιγμή στην Αθήνα έχει $t βαθμούς, $condition, υγρασία $h τοις εκατό και άνεμο $w χιλιόμετρα την ώρα."
+    main.post {
+     weather = "$t°C"
+     weatherDetails = "Αθήνα · $condition · Υγρασία $h% · Άνεμος $w km/h"
+     lastWeatherUpdate = System.currentTimeMillis()
+     onAnswer?.invoke(answer)
+    }
+   } catch (_: Exception) {
+    main.post {
+     weather = "Χωρίς δεδομένα"
+     weatherDetails = "Έλεγξε τη σύνδεση · Ανανέωση"
+     onAnswer?.invoke("Δεν μπόρεσα να ανακτήσω ζωντανά δεδομένα καιρού. Έλεγξε τη σύνδεση.")
+    }
+   }
   }.start()
  }
  private fun localReply(words: String): String {

@@ -1,0 +1,1 @@
+JOHNA 1.0.4: Voice weather queries open Weather Panel and fetch live Open-Meteo conditions directly. Dashboard commands remain local. Groq request limited to shorter response, smaller context, low latency timeouts and fallback. This is source; Android build and device test required. Weather currently fixed to Athens.\n

@@ -1,0 +1,1 @@
+JOHNA v1.0.5: Fix Greek voice close commands, including standalone Πίσω/Κλείσε, and ensure settings dialog closes as well as expanded panels. Based on v1.0.4. Requires GitHub Actions Android build and device testing.

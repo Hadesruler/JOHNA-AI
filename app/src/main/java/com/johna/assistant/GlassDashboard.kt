@@ -51,8 +51,11 @@ fun GlassDashboard(status:String, heard:String, aiResponse:String, voicePanel:St
  var settings by remember { mutableStateOf(false) }
  LaunchedEffect(voicePanel) {
   if (voicePanel.isNotBlank()) {
-   if (voicePanel == "settings") settings = true
-   else focused = if (voicePanel == "close") "" else voicePanel
+   when (voicePanel) {
+    "close" -> { focused = ""; settings = false; seconds = 0 }
+    "settings" -> { focused = ""; settings = true }
+    else -> { settings = false; focused = voicePanel }
+   }
    onVoicePanelConsumed()
   }
  }
@@ -65,7 +68,8 @@ fun GlassDashboard(status:String, heard:String, aiResponse:String, voicePanel:St
  val time=remember(now){SimpleDateFormat("HH:mm",Locale("el","GR")).format(Date(now))}
  val date=remember(now){SimpleDateFormat("EEE, d MMM yyyy",Locale("el","GR")).format(Date(now))}
  val infinite=rememberInfiniteTransition(label="orb")
- val pulse by infinite.animateFloat(.94f,1.045f,infiniteRepeatable(tween(2100),RepeatMode.Reverse),label="pulse")
+ val pulse by infinite.animateFloat(.97f,1.025f,infiniteRepeatable(tween(2500),RepeatMode.Reverse),label="pulse")
+ val globeTurn by infinite.animateFloat(0f,360f,infiniteRepeatable(tween(24000, easing=LinearEasing),RepeatMode.Restart),label="globeTurn")
  val context=androidx.compose.ui.platform.LocalContext.current
  val prefs=remember {context.getSharedPreferences("johna_glass",0)}
  LaunchedEffect(Unit) { theme=prefs.getInt("theme",0).coerceIn(0,3) }
@@ -93,9 +97,8 @@ fun GlassDashboard(status:String, heard:String, aiResponse:String, voicePanel:St
      }
     }
     Column(Modifier.weight(1.36f),horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.Center) {
-     Image(painterResource(R.drawable.johna_glass_orb),"JOHNA AI",Modifier.fillMaxWidth(.78f).aspectRatio(1f).graphicsLayer {scaleX=pulse;scaleY=pulse}.clickable {onListen()},contentScale=ContentScale.Fit)
+     Image(painterResource(R.drawable.johna_glass_orb),"JOHNA AI",Modifier.fillMaxWidth(.78f).aspectRatio(1f).graphicsLayer {scaleX=pulse;scaleY=pulse; rotationY=globeTurn; cameraDistance=24f * density}.clickable {onListen()},contentScale=ContentScale.Fit)
      Text(status,color=white,fontSize=16.sp,fontWeight=FontWeight.Medium)
-     Text(heard,color=white.copy(alpha=.8f),fontSize=11.sp,textAlign=TextAlign.Center,maxLines=2)
      Text(aiResponse,color=aqua,fontSize=12.sp,textAlign=TextAlign.Center,maxLines=5,modifier=Modifier.fillMaxWidth().heightIn(max=105.dp).verticalScroll(rememberScrollState()))
      Spacer(Modifier.height(12.dp))
      Row(horizontalArrangement=Arrangement.spacedBy(8.dp),verticalAlignment=Alignment.CenterVertically) {
