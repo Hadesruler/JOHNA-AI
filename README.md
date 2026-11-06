@@ -1,13 +1,16 @@
-# JOHNA AI v0.4 — Futuristic Dashboard
+# JOHNA AI v0.7 — Animated Smart Home Dashboard
 
-Neon magenta/cyan Compose dashboard with animated central audio waveform orb (no avatar), responsive tablet layout, live Open-Meteo Athens weather, Android notification access, agent status panels, device placeholders, calendar, conversation history, and existing Google Greek speech/TTS.
+Android/Jetpack Compose source project, based on v0.6.
 
-## Limitations
-This is an Android source project, not a prebuilt APK. Not compiled/tested in this environment. AI agent tiles are informational, not connected autonomous agents. Local LLM and 'Hey Johna' wake-word detection are not implemented. Device connection tiles are placeholders. The calendar is a simple day grid, not linked to Google Calendar.
+## Added
+- Four persistent color themes (Cyber Purple, Midnight Blue, Arctic White, Amber Tech), selectable from THEMES in the header.
+- Animated status tiles with custom PNG assets for AI, Wi-Fi, Home and Voice; extra PNGs for lights, camera, climate and power.
+- Animated neon borders on cards, live orb and existing voice controls.
+- Existing local network mDNS discovery panel, voice conversation, encrypted API key, weather and notifications preserved.
+- Gemini Flash Lite preferred; fallback retained.
 
-## Build
-Push project to GitHub and use `.github/workflows/build-apk.yml` to build debug APK; check Actions logs and artifacts.
-
-JOHNA v0.5: Gemini API settings in-app, Android Keystore encrypted API key, hidden local conversation memory. No API key is bundled.
-
-JOHNA v0.5.3: Gemini 3.8 Flash with retries and fallback to 3.1 Flash Lite and 3.5 Flash Lite.
+## Important limitations
+- No APK build was run here. GitHub Actions must compile and test.
+- Discovery is not pairing or controlling devices. Vendor-specific adapters are needed.
+- Some themes retain light text on dark widget cards; full per-widget theme polish is future work.
+- No API key is embedded. Keep your key in the app's encrypted storage; do not uninstall/clear app data if you want to retain it.

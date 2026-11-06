@@ -1,5 +1,7 @@
 package com.johna.assistant
 
+import android.net.nsd.NsdManager
+import android.net.nsd.NsdServiceInfo
 import android.Manifest
 import android.content.Intent
 import android.content.ComponentName
@@ -32,6 +34,10 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.*
+import androidx.compose.animation.*
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.res.painterResource
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -77,6 +83,34 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
  private var apiKey by mutableStateOf("")
  private var keyConfigured by mutableStateOf(false)
  private var requestGeneration = 0
+ private var deviceScan by mutableStateOf("Πάτησε Αναζήτηση για συσκευές Wi-Fi")
+ private val foundDevices = mutableStateListOf<Pair<String,String>>()
+ private val discoveries = mutableListOf<NsdManager.DiscoveryListener>()
+ private fun discoverDevices() {
+  val nsd = getSystemService(NSD_SERVICE) as NsdManager
+  discoveries.forEach { try { nsd.stopServiceDiscovery(it) } catch (_: Exception) {} }
+  discoveries.clear(); foundDevices.clear(); deviceScan = "Αναζήτηση στο τοπικό δίκτυο..."
+  listOf("_googlecast._tcp.", "_http._tcp.", "_hap._tcp.", "_matter._tcp.", "_ipp._tcp.", "_airplay._tcp.").forEach { type ->
+   val listener = object : NsdManager.DiscoveryListener {
+    override fun onDiscoveryStarted(t: String) {}
+    override fun onDiscoveryStopped(t: String) {}
+    override fun onStartDiscoveryFailed(t: String, code: Int) { main.post { deviceScan = "Μερικές υπηρεσίες δεν είναι διαθέσιμες ($code)" } }
+    override fun onStopDiscoveryFailed(t: String, code: Int) {}
+    override fun onServiceLost(info: NsdServiceInfo) { main.post { foundDevices.removeAll { it.first == info.serviceName && it.second == type } } }
+    override fun onServiceFound(info: NsdServiceInfo) { main.post {
+     val entry = info.serviceName to type
+     if (!foundDevices.contains(entry)) foundDevices.add(entry)
+     deviceScan = "Βρέθηκαν ${foundDevices.size} υπηρεσίες · πάτησε για λεπτομέρειες"
+    } }
+   }
+   try { nsd.discoverServices(type, NsdManager.PROTOCOL_DNS_SD, listener); discoveries.add(listener) }
+   catch (_: Exception) { }
+  }
+  main.postDelayed({ discoveries.toList().forEach { try { nsd.stopServiceDiscovery(it) } catch (_: Exception) {} }; discoveries.clear()
+   if (foundDevices.isEmpty()) deviceScan = "Δεν εντοπίστηκαν συμβατές υπηρεσίες mDNS"
+  }, 12000)
+ }
+
  private val conversationFile by lazy { java.io.File(filesDir, "johna_conversation.json") }
  private fun cipherKey(): javax.crypto.SecretKey {
   val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
@@ -146,16 +180,16 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
      .put("contents",contents)
      .put("generationConfig",JSONObject().put("maxOutputTokens",400))
     // Retry transient failures, then switch to a lighter available model.
-    val models = listOf("gemini-3.8-flash", "gemini-3.1-flash-lite", "gemini-3.5-flash-lite")
+    val models = listOf("gemini-3.1-flash-lite", "gemini-3.8-flash")
     var lastCode = 0
     var lastMessage = ""
     var finished = false
     for (model in models) {
      if (finished) break
-     for (attempt in 0..1) {
+     for (attempt in 0..0) {
       val conn = URL("https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent").openConnection() as HttpURLConnection
       try {
-       conn.requestMethod = "POST"; conn.connectTimeout = 8000; conn.readTimeout = 18000
+       conn.requestMethod = "POST"; conn.connectTimeout = 4000; conn.readTimeout = 8000
        conn.setRequestProperty("Content-Type", "application/json; charset=utf-8")
        conn.setRequestProperty("x-goog-api-key", key)
        conn.doOutput = true
@@ -222,8 +256,9 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
   NotificationBridge.onUpdate = { items -> main.post { notifications = items } }
   refreshWeather()
   setContent {
-   JohnaScreen(status, heard, continuous, weather, weatherDetails, notifications, agentInfo, wakeEnabled, keyConfigured,
+   JohnaScreen(status, heard, continuous, weather, weatherDetails, notifications, agentInfo, wakeEnabled, keyConfigured, foundDevices.toList(), deviceScan,
     onWeather = { refreshWeather() },
+    onDiscover = { discoverDevices() },
     onSaveKey = { saveKey(it) },
     onClearHistory = { clearHistory() },
     onNotifications = { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) },
@@ -326,20 +361,25 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
    else -> "Άκουσα: $words. Το τοπικό AI δεν έχει εγκατασταθεί ακόμη."
   }
  }
- override fun onDestroy() { NotificationBridge.onUpdate = null; active = false; recognizer?.destroy(); tts?.stop(); tts?.shutdown(); super.onDestroy() }
+ override fun onDestroy() { val nsd = getSystemService(NSD_SERVICE) as NsdManager; discoveries.forEach { try { nsd.stopServiceDiscovery(it) } catch (_: Exception) {} }; NotificationBridge.onUpdate = null; active = false; recognizer?.destroy(); tts?.stop(); tts?.shutdown(); super.onDestroy() }
 }
 
 @Composable
 fun JohnaScreen(status: String, heard: String, continuous: Boolean,
- weather: String, weatherDetails: String, notifications: List<String>, agentInfo: String, wakeEnabled: Boolean, keyConfigured: Boolean,
- onWeather: () -> Unit, onSaveKey: (String) -> Unit, onClearHistory: () -> Unit, onNotifications: () -> Unit, onWake: (Boolean) -> Unit,
+ weather: String, weatherDetails: String, notifications: List<String>, agentInfo: String, wakeEnabled: Boolean, keyConfigured: Boolean, devices: List<Pair<String,String>>, deviceScan: String,
+ onWeather: () -> Unit, onDiscover: () -> Unit, onSaveKey: (String) -> Unit, onClearHistory: () -> Unit, onNotifications: () -> Unit, onWake: (Boolean) -> Unit,
  onContinuous: (Boolean) -> Unit, onListen: () -> Unit, onStop: () -> Unit, onHello: () -> Unit) {
  var showAiSettings by remember { mutableStateOf(false) }
+ val context = androidx.compose.ui.platform.LocalContext.current
+ val prefs = remember { context.getSharedPreferences("johna_theme", android.content.Context.MODE_PRIVATE) }
+ var themeIndex by remember { mutableIntStateOf(prefs.getInt("theme",0)) }
+ var showThemes by remember { mutableStateOf(false) }
+ val themes = listOf("Cyber Purple", "Midnight Blue", "Arctic White", "Amber Tech")
  var keyDraft by remember { mutableStateOf("") }
- val bg = Color(0xFF080717)
- val panel = Color(0xFF15122B)
- val purple = Color(0xFFB13CFF)
- val cyan = Color(0xFF18D8FF)
+ val bg = listOf(Color(0xFF080717),Color(0xFF061323),Color(0xFFE6EDF4),Color(0xFF110E09))[themeIndex]
+ val panel = listOf(Color(0xFF15122B),Color(0xFF10253A),Color(0xFF263A53),Color(0xFF241C13))[themeIndex]
+ val purple = listOf(Color(0xFFB13CFF),Color(0xFF4A8BFF),Color(0xFF4C71D5),Color(0xFFFFA32B))[themeIndex]
+ val cyan = listOf(Color(0xFF18D8FF),Color(0xFF37D6F5),Color(0xFF2C91B8),Color(0xFFFFCB65))[themeIndex]
  val muted = Color(0xFFADA5CC)
  val narrow = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp < 650
  val clock = remember { SimpleDateFormat("HH:mm", Locale("el", "GR")).format(Date()) }
@@ -350,11 +390,20 @@ fun JohnaScreen(status: String, heard: String, continuous: Boolean,
    Column { Text(clock, color=Color.White, fontSize=25.sp, fontWeight=FontWeight.Bold); Text(date, color=cyan, fontSize=11.sp) }
    Column(horizontalAlignment=Alignment.CenterHorizontally) {
     Text("JOHNA AI", color=Color(0xFFF2D8FF), fontSize=if(narrow) 24.sp else 33.sp, fontWeight=FontWeight.Bold, letterSpacing=2.sp)
-    Text("HOME COMMAND CENTER · v0.5.3", color=muted, fontSize=9.sp)
+    Text("HOME COMMAND CENTER · v0.7.0", color=muted, fontSize=9.sp)
    }
-   Text("◉  EL", color=cyan, fontSize=13.sp)
+   TextButton(onClick={showThemes=true}) { Text("◈ THEMES", color=cyan, fontSize=12.sp) }
   }
   Spacer(Modifier.height(12.dp))
+  AnimatedVisibility(visible=true, enter=fadeIn(tween(600))+slideInVertically(initialOffsetY={it/5})) {
+   Row(Modifier.fillMaxWidth(), horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+    MiniTile("AI", "●", purple, Modifier.weight(1f))
+    MiniTile("Wi-Fi", "◉", cyan, Modifier.weight(1f))
+    MiniTile("HOME", "⌂", purple, Modifier.weight(1f))
+    MiniTile("VOICE", "♫", cyan, Modifier.weight(1f))
+   }
+  }
+  Spacer(Modifier.height(10.dp))
   if (narrow) {
    NeonOrb(status, heard, pulse, purple, cyan, onListen)
    Spacer(Modifier.height(10.dp))
@@ -373,7 +422,7 @@ fun JohnaScreen(status: String, heard: String, continuous: Boolean,
     Column(Modifier.weight(1.35f), horizontalAlignment=Alignment.CenterHorizontally) {
      NeonOrb(status, heard, pulse, purple, cyan, onListen)
      Spacer(Modifier.height(10.dp))
-     DevicePanel(panel, cyan)
+     DevicePanel(panel, cyan, devices, deviceScan, onDiscover)
     }
     Column(Modifier.weight(1f)) {
      NotificationsPanel(notifications, panel, cyan, onNotifications)
@@ -382,7 +431,7 @@ fun JohnaScreen(status: String, heard: String, continuous: Boolean,
     }
    }
   }
-  if (narrow) { Spacer(Modifier.height(8.dp)); DevicePanel(panel, cyan); Spacer(Modifier.height(8.dp)); CalendarPanel(panel, purple) }
+  if (narrow) { Spacer(Modifier.height(8.dp)); DevicePanel(panel, cyan, devices, deviceScan, onDiscover); Spacer(Modifier.height(8.dp)); CalendarPanel(panel, purple) }
   Spacer(Modifier.height(12.dp))
   NeonCard(panel, purple) {
    Row(Modifier.fillMaxWidth(), verticalAlignment=Alignment.CenterVertically) {
@@ -413,13 +462,37 @@ fun JohnaScreen(status: String, heard: String, continuous: Boolean,
    }
   }
   Spacer(Modifier.height(8.dp))
-  Text("Gemini Flash · Φωνητική συνομιλία · Κρυφή τοπική μνήμη", color=muted, fontSize=10.sp)
+  Text("Gemini Flash-Lite · Φωνή · Ιδιωτική μνήμη · Smart Home", color=muted, fontSize=10.sp)
+ }
+ if(showThemes) AlertDialog(onDismissRequest={showThemes=false}, title={Text("JOHNA THEMES")},
+  text={Column(verticalArrangement=Arrangement.spacedBy(8.dp)) {
+   themes.forEachIndexed { index, title ->
+    Row(Modifier.fillMaxWidth().clickable { themeIndex=index; prefs.edit().putInt("theme",index).apply(); showThemes=false }.padding(10.dp),
+      verticalAlignment=Alignment.CenterVertically) {
+     Box(Modifier.size(22.dp).background(listOf(Color(0xFFB13CFF),Color(0xFF4A8BFF),Color(0xFFE6EDF4),Color(0xFFFFA32B))[index], RoundedCornerShape(6.dp)))
+     Spacer(Modifier.width(12.dp)); Text(title)
+     if(index==themeIndex) Text("  ✓")
+    }
+   }
+  }}, confirmButton={TextButton(onClick={showThemes=false}){Text("Κλείσιμο")}})
+}
+
+@Composable
+private fun MiniTile(label:String, glyph:String, accent:Color, modifier:Modifier=Modifier) {
+ val t=rememberInfiniteTransition(label="tile-$label")
+ val alpha by t.animateFloat(.55f,1f,infiniteRepeatable(tween(1600),RepeatMode.Reverse),label="glow")
+ Column(modifier.border(1.dp,accent.copy(alpha=alpha),RoundedCornerShape(12.dp)).background(Color(0xFF141A2B),RoundedCornerShape(12.dp)).padding(10.dp), horizontalAlignment=Alignment.CenterHorizontally) {
+  val iconRes = when(label) { "AI"->R.drawable.johna_ai; "Wi-Fi"->R.drawable.johna_wifi; "HOME"->R.drawable.johna_home; else->R.drawable.johna_voice }
+  Image(painterResource(iconRes),contentDescription=label,modifier=Modifier.size(32.dp).graphicsLayer { rotationZ=(1f-alpha)*12f })
+  Text(label,color=Color.White,fontSize=9.sp)
  }
 }
 
 @Composable
 private fun NeonCard(bg: Color, accent: Color, content: @Composable ColumnScope.() -> Unit) {
- Column(Modifier.fillMaxWidth().border(1.dp, accent.copy(alpha=.65f), RoundedCornerShape(16.dp))
+ val transition=rememberInfiniteTransition(label="cardGlow")
+ val glow by transition.animateFloat(.3f,.75f,infiniteRepeatable(tween(2300),RepeatMode.Reverse),label="glow")
+ Column(Modifier.fillMaxWidth().border(1.dp, accent.copy(alpha=glow), RoundedCornerShape(16.dp))
   .background(bg, RoundedCornerShape(16.dp)).padding(12.dp), verticalArrangement=Arrangement.spacedBy(7.dp), content=content)
 }
 
@@ -482,19 +555,26 @@ private fun NotificationsPanel(items: List<String>, panel: Color, accent: Color,
 }
 
 @Composable
-private fun DevicePanel(panel: Color, accent: Color) {
+private fun DevicePanel(panel: Color, accent: Color, devices: List<Pair<String,String>>, scanStatus: String, onDiscover: () -> Unit) {
+ var selected by remember { mutableStateOf<Pair<String,String>?>(null) }
  NeonCard(panel,accent) {
-  Text("ΣΥΣΚΕΥΕΣ", color=accent, fontWeight=FontWeight.Bold, fontSize=12.sp)
-  Row(horizontalArrangement=Arrangement.spacedBy(5.dp)) {
-   listOf("▣" to "LG TV", "▤" to "Bambu A1", "⌂" to "Smart Home", "◎" to "Web").forEach { (icon,title) ->
-    Column(Modifier.weight(1f).background(Color(0xFF21193D),RoundedCornerShape(10.dp)).padding(6.dp), horizontalAlignment=Alignment.CenterHorizontally) {
-     Text(icon,color=accent,fontSize=23.sp)
-     Text(title,color=Color.White,fontSize=10.sp, textAlign=TextAlign.Center)
-     Text("Εκκρεμεί",color=Color(0xFFADA5CC),fontSize=8.sp)
-    }
+  Row(Modifier.fillMaxWidth(), horizontalArrangement=Arrangement.SpaceBetween, verticalAlignment=Alignment.CenterVertically) {
+   Text("⌂  ΕΞΥΠΝΕΣ ΣΥΣΚΕΥΕΣ", color=accent, fontWeight=FontWeight.Bold, fontSize=12.sp)
+   TextButton(onClick=onDiscover) { Text("↻ Αναζήτηση", color=accent) }
+  }
+  Text(scanStatus, color=Color(0xFFADA5CC), fontSize=10.sp)
+  devices.take(18).forEach { (name, type) ->
+   val symbol = when { "cast" in type -> "▣"; "matter" in type || "hap" in type -> "⌂"; "ipp" in type -> "▤"; else -> "◈" }
+   Row(Modifier.fillMaxWidth().padding(vertical=3.dp).background(Color(0xFF21193D),RoundedCornerShape(10.dp)).clickable { selected=name to type }.padding(10.dp), horizontalArrangement=Arrangement.spacedBy(10.dp)) {
+    Text(symbol, color=accent, fontSize=22.sp)
+    Column { Text(name,color=Color.White,fontSize=12.sp); Text(type,color=Color(0xFFADA5CC),fontSize=10.sp) }
    }
   }
  }
+ if (selected != null) AlertDialog(onDismissRequest={ selected=null },
+  title={ Text(selected!!.first) },
+  text={ Text("Εντοπίστηκε υπηρεσία ${selected!!.second} στο Wi-Fi. Η σύνδεση και ο έλεγχος απαιτούν υποστήριξη του πρωτοκόλλου και πιθανώς pairing. Δεν έχει πραγματοποιηθεί σύνδεση.") },
+  confirmButton={ TextButton(onClick={ selected=null }) { Text("Κλείσιμο") } })
 }
 
 @Composable
