@@ -41,10 +41,10 @@ private fun GlassBox(title: String, modifier: Modifier = Modifier, onExpand: () 
 }
 
 @Composable
-fun GlassDashboard(status:String, heard:String, continuous:Boolean, weather:String, weatherDetails:String,
+fun GlassDashboard(status:String, heard:String, aiResponse:String, continuous:Boolean, weather:String, weatherDetails:String,
  notifications:List<String>, devices:List<Pair<String,String>>, deviceScan:String, keyConfigured:Boolean,
  onWeather:()->Unit,onDiscover:()->Unit,onNotifications:()->Unit,onListen:()->Unit,onStop:()->Unit,
- onContinuous:(Boolean)->Unit,onSaveKey:(String)->Unit,onClearHistory:()->Unit,onHello:()->Unit) {
+ onContinuous:(Boolean)->Unit,onSaveKey:(String)->Unit,onClearHistory:()->Unit,onHello:()->Unit,onTestGroq:()->Unit) {
  var focused by remember { mutableStateOf("") }
  var seconds by remember { mutableIntStateOf(0) }
  var theme by remember { mutableIntStateOf(0) }
@@ -89,6 +89,7 @@ fun GlassDashboard(status:String, heard:String, continuous:Boolean, weather:Stri
      Image(painterResource(R.drawable.johna_glass_orb),"JOHNA AI",Modifier.fillMaxWidth(.78f).aspectRatio(1f).graphicsLayer {scaleX=pulse;scaleY=pulse}.clickable {onListen()},contentScale=ContentScale.Fit)
      Text(status,color=white,fontSize=16.sp,fontWeight=FontWeight.Medium)
      Text(heard,color=white.copy(alpha=.8f),fontSize=11.sp,textAlign=TextAlign.Center,maxLines=2)
+     Text(aiResponse,color=aqua,fontSize=12.sp,textAlign=TextAlign.Center,maxLines=5,modifier=Modifier.fillMaxWidth().heightIn(max=105.dp).verticalScroll(rememberScrollState()))
      Spacer(Modifier.height(12.dp))
      Row(horizontalArrangement=Arrangement.spacedBy(8.dp),verticalAlignment=Alignment.CenterVertically) {
       Button(onClick=onListen,colors=ButtonDefaults.buttonColors(containerColor=Color(0xBB7555C6))) {Text("🎙  Μίλα στη Johna")}
@@ -137,11 +138,12 @@ fun GlassDashboard(status:String, heard:String, continuous:Boolean, weather:Stri
    }
   }
   if(settings) AlertDialog(onDismissRequest={settings=false},title={Text("Ρυθμίσεις JOHNA")},text={Column {
-   Text(if(keyConfigured) "Gemini API key αποθηκευμένο" else "Δεν υπάρχει Gemini API key")
+   Text(if(keyConfigured) "Groq API key αποθηκευμένο" else "Δεν υπάρχει Groq API key")
    OutlinedTextField(keyDraft,{keyDraft=it},label={Text("Νέο API key")},singleLine=true)
    TextButton(onClick={if(keyDraft.isNotBlank())onSaveKey(keyDraft.trim());keyDraft=""}){Text("Αποθήκευση κρυπτογραφημένα")}
    TextButton(onClick=onClearHistory){Text("Διαγραφή μνήμης συνομιλιών")}
    TextButton(onClick=onHello){Text("Δοκιμή φωνής")}
+   TextButton(onClick={settings=false;onTestGroq()}){Text("Δοκιμή σύνδεσης Groq (χωρίς μικρόφωνο)")}
   }},confirmButton={TextButton(onClick={settings=false}){Text("Κλείσιμο")}})
  }
 }

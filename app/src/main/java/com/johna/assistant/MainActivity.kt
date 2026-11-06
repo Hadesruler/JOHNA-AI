@@ -79,6 +79,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
  private var wakeEnabled by mutableStateOf(false)
  private var lastWeatherUpdate = 0L
  private var status by mutableStateOf("Έτοιμη")
+ private var aiResponse by mutableStateOf("Η απάντηση ή το σφάλμα Groq θα εμφανιστεί εδώ.")
  private var heard by mutableStateOf("Πάτησε Μίλα ή ενεργοποίησε τη συνομιλία")
  private var continuous by mutableStateOf(false)
  private var history = mutableStateListOf<Pair<String, String>>()
@@ -178,14 +179,15 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
    else -> null
   }
  }
- private fun askGemini(words: String) {
+ private fun askGroq(words: String) {
   val local = localDeviceAnswer(words)
-  if (local != null) { speak(local); return }
+  if (local != null) { aiResponse = local; speak(local); return }
   val generation = ++requestGeneration
   val context = history.takeLast(6).toList()
   val key = apiKey.trim()
-  if (key.isBlank() || key.startsWith("{")) { speak("Πρόσθεσε το Groq API key στις Ρυθμίσεις AI."); return }
-  status = "JOHNA Cloud AI · σύνδεση..."
+  if (key.isBlank() || key.startsWith("{")) { aiResponse = "Πρόσθεσε το Groq API key στις Ρυθμίσεις AI."; status = "Λείπει το API key"; speak(aiResponse); return }
+  status = "Groq · αποστολή αιτήματος..."
+  aiResponse = "Αποστολή στο Groq..."
   Thread {
    var reply = ""
    var success = false
@@ -200,7 +202,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
    messages.put(JSONObject().put("role","user").put("content",words))
    var conn: HttpURLConnection? = null
    try {
-    val body = JSONObject().put("model", "llama-3.3-70b-versatile").put("messages", messages)
+    val body = JSONObject().put("model", "openai/gpt-oss-20b").put("messages", messages)
      .put("stream", false).put("max_tokens", 300).put("temperature", 0.5)
     conn = URL("https://api.groq.com/openai/v1/chat/completions").openConnection() as HttpURLConnection
     conn.requestMethod = "POST"
@@ -241,8 +243,9 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
    if (!success) reply = "Groq: ${diagnostic.ifBlank { "Άγνωστο σφάλμα" }}"
    main.post {
     if (generation != requestGeneration || isDestroyed) return@post
+    aiResponse = reply
+    status = if (success) "JOHNA AI · $providerUsed · απάντησε" else "Groq · αποτυχία"
     if (success) {
-     status = "JOHNA AI · $providerUsed"
      history.add(words to reply)
      while (history.size > 20) history.removeAt(0)
      persistHistory()
@@ -261,14 +264,14 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
   loadHistory()
   tts = TextToSpeech(this, this)
   tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-   override fun onStart(utteranceId: String?) { main.post { speaking = true; status = "Μιλάω" } }
-   override fun onDone(utteranceId: String?) { main.post { speaking = false; if (active && continuous) main.postDelayed({ beginListening() }, 450) else status = "Έτοιμη" } }
-   override fun onError(utteranceId: String?) { main.post { speaking = false; status = "Σφάλμα φωνής" } }
+   override fun onStart(utteranceId: String?) { main.post { speaking = true } }
+   override fun onDone(utteranceId: String?) { main.post { speaking = false; if (active && continuous) main.postDelayed({ beginListening() }, 450) else if (status == "Μιλάω") status = "Έτοιμη" } }
+   override fun onError(utteranceId: String?) { main.post { speaking = false; if (!status.startsWith("Groq")) status = "Σφάλμα φωνής" } }
   })
   NotificationBridge.onUpdate = { items -> main.post { notifications = items } }
   refreshWeather()
   setContent {
-   GlassDashboard(status, heard, continuous, weather, weatherDetails, notifications, foundDevices.toList(), deviceScan, keyConfigured,
+   GlassDashboard(status, heard, aiResponse, continuous, weather, weatherDetails, notifications, foundDevices.toList(), deviceScan, keyConfigured,
     onWeather = { refreshWeather() },
     onDiscover = { discoverDevices() },
     onSaveKey = { saveKey(it) },
@@ -277,7 +280,8 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     onContinuous = { enabled -> continuous = enabled; if (enabled) { active = true; requestListen() } else stopConversation() },
     onListen = { active = true; requestListen() },
     onStop = { stopConversation() },
-    onHello = { active = false; speak("Γεια σου! Είμαι η Τζόνα. Είμαι έτοιμη.") })
+    onHello = { active = false; speak("Γεια σου! Είμαι η Τζόνα. Είμαι έτοιμη.") },
+    onTestGroq = { active = false; askGroq("Απάντησε σύντομα στα ελληνικά: λειτουργείς;") })
   }
  }
  override fun onInit(result: Int) {
@@ -297,8 +301,8 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
   else permission.launch(Manifest.permission.RECORD_AUDIO)
  }
  private fun speak(text: String) {
-  if (!ttsReady) { status = "Η ελληνική φωνή δεν είναι έτοιμη"; return }
-  status = "Μιλάω"; speaking = true
+  if (!ttsReady) { speaking = false; return }
+  speaking = true
   tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "johna_${System.currentTimeMillis()}")
  }
  private fun beginListening() {
@@ -325,7 +329,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
      val words = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty().trim()
      if (words.isBlank()) { if (active && continuous) main.postDelayed({ beginListening() }, 600); return }
      heard = words
-     askGemini(words)
+     askGroq(words)
     }
     override fun onPartialResults(partialResults: Bundle?) {
      val partial = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
