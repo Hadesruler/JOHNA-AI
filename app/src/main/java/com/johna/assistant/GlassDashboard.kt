@@ -41,18 +41,18 @@ private fun GlassBox(title: String, modifier: Modifier = Modifier, onExpand: () 
 }
 
 @Composable
-fun GlassDashboard(status:String, heard:String, aiResponse:String, voicePanel:String, onVoicePanelConsumed:()->Unit, continuous:Boolean, weather:String, weatherDetails:String,
+fun GlassDashboard(status:String, heard:String, aiResponse:String, voicePanel:String, onVoicePanelConsumed:()->Unit, speaking:Boolean, continuous:Boolean, weather:String, weatherDetails:String,
  notifications:List<String>, devices:List<Pair<String,String>>, deviceScan:String, keyConfigured:Boolean,
  onWeather:()->Unit,onDiscover:()->Unit,onNotifications:()->Unit,onListen:()->Unit,onStop:()->Unit,
- onContinuous:(Boolean)->Unit,onSaveKey:(String)->Unit,onClearHistory:()->Unit,onHello:()->Unit,onTestGroq:()->Unit) {
+ onContinuous:(Boolean)->Unit,onSaveKey:(String)->Unit,onClearHistory:()->Unit,onHello:()->Unit,onTestGroq:()->Unit, onOpenMail:()->Unit, onOpenChrome:()->Unit, onOpenCamera:()->Unit) {
  var focused by remember { mutableStateOf("") }
- var seconds by remember { mutableIntStateOf(0) }
+ var seconds by remember { mutableIntStateOf(10) }
  var theme by remember { mutableIntStateOf(0) }
  var settings by remember { mutableStateOf(false) }
  LaunchedEffect(voicePanel) {
   if (voicePanel.isNotBlank()) {
    when (voicePanel) {
-    "close" -> { focused = ""; settings = false; seconds = 0 }
+    "close" -> { focused = ""; settings = false }
     "settings" -> { focused = ""; settings = true }
     else -> { settings = false; focused = voicePanel }
    }
@@ -62,14 +62,14 @@ fun GlassDashboard(status:String, heard:String, aiResponse:String, voicePanel:St
  var keyDraft by remember { mutableStateOf("") }
  var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
  LaunchedEffect(Unit) { while(true) { now=System.currentTimeMillis(); delay(1000) } }
- LaunchedEffect(focused,seconds) { if(focused.isNotEmpty() && seconds>0) { delay(seconds*1000L);focused="";seconds=0 } }
+ LaunchedEffect(focused,seconds) { if(focused.isNotEmpty() && seconds>0) { delay(seconds*1000L);focused="" } }
  val accents=listOf(aqua,lavender,Color(0xFFFFCB87),Color(0xFFB7E5FF))
  val accent=accents[theme]
  val time=remember(now){SimpleDateFormat("HH:mm",Locale("el","GR")).format(Date(now))}
  val date=remember(now){SimpleDateFormat("EEE, d MMM yyyy",Locale("el","GR")).format(Date(now))}
  val infinite=rememberInfiniteTransition(label="orb")
  val pulse by infinite.animateFloat(.97f,1.025f,infiniteRepeatable(tween(2500),RepeatMode.Reverse),label="pulse")
- val globeTurn by infinite.animateFloat(0f,360f,infiniteRepeatable(tween(24000, easing=LinearEasing),RepeatMode.Restart),label="globeTurn")
+ 
  val context=androidx.compose.ui.platform.LocalContext.current
  val prefs=remember {context.getSharedPreferences("johna_glass",0)}
  LaunchedEffect(Unit) { theme=prefs.getInt("theme",0).coerceIn(0,3) }
@@ -97,7 +97,7 @@ fun GlassDashboard(status:String, heard:String, aiResponse:String, voicePanel:St
      }
     }
     Column(Modifier.weight(1.36f),horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.Center) {
-     Image(painterResource(R.drawable.johna_glass_orb),"JOHNA AI",Modifier.fillMaxWidth(.78f).aspectRatio(1f).graphicsLayer {scaleX=pulse;scaleY=pulse; rotationY=globeTurn; cameraDistance=24f * density}.clickable {onListen()},contentScale=ContentScale.Fit)
+     JohnaSphere(speaking=speaking, modifier=Modifier.fillMaxWidth(.78f).aspectRatio(1f).graphicsLayer {scaleX=pulse;scaleY=pulse}.clickable {onListen()})
      Text(status,color=white,fontSize=16.sp,fontWeight=FontWeight.Medium)
      Text(aiResponse,color=aqua,fontSize=12.sp,textAlign=TextAlign.Center,maxLines=5,modifier=Modifier.fillMaxWidth().heightIn(max=105.dp).verticalScroll(rememberScrollState()))
      Spacer(Modifier.height(12.dp))
@@ -105,7 +105,7 @@ fun GlassDashboard(status:String, heard:String, aiResponse:String, voicePanel:St
       Button(onClick=onListen,colors=ButtonDefaults.buttonColors(containerColor=Color(0xBB7555C6))) {Text("🎙  Μίλα στη Johna")}
       OutlinedButton(onClick=onStop){Text("Στοπ",color=white)}
      }
-     Row(verticalAlignment=Alignment.CenterVertically) {Text("Συνεχής συνομιλία",color=white,fontSize=11.sp);Switch(checked=continuous,onCheckedChange=onContinuous,modifier=Modifier.height(35.dp))}
+     Text("Πάτησε Μίλα · μία εντολή κάθε φορά",color=white.copy(alpha=.8f),fontSize=11.sp)
     }
     Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(12.dp)) {
      GlassBox("♧  Ειδοποιήσεις (${notifications.size})",Modifier.weight(1f),onExpand={focused="notifications"}) {
@@ -121,22 +121,56 @@ fun GlassDashboard(status:String, heard:String, aiResponse:String, voicePanel:St
    }
    Spacer(Modifier.height(14.dp))
    Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(10.dp)) {
-    listOf("◉" to "Συνομιλία","☀" to "Καιρός","▦" to "Ημερολόγιο","♧" to "Ειδοποιήσεις","⌂" to "Συσκευές","⚙" to "Ρυθμίσεις").forEachIndexed { index,item ->
+    listOf("◉" to "Συνομιλία","☀" to "Καιρός","▦" to "Ημερολόγιο","✉" to "Mail","◉" to "Chrome","◉" to "Κάμερα","⚙" to "Ρυθμίσεις").forEachIndexed { index,item ->
      Column(Modifier.weight(1f).height(82.dp).shadow(12.dp,RoundedCornerShape(20.dp))
       .border(1.dp,accent.copy(alpha=.7f),RoundedCornerShape(20.dp)).background(Color(0x88546696),RoundedCornerShape(20.dp))
-      .clickable { when(index){0->onListen();1->focused="weather";2->focused="calendar";3->focused="notifications";4->focused="devices";else->settings=true} }
+      .clickable { when(index){0->onListen();1->focused="weather";2->focused="calendar";3->focused="mail";4->onOpenChrome();5->onOpenCamera();else->settings=true} }
       .padding(7.dp),horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.Center) {
        Text(item.first,color=white,fontSize=26.sp);Text(item.second,color=white,fontSize=11.sp)
       }
     }
    }
   }
-  AnimatedVisibility(focused.isNotEmpty(),enter=fadeIn(tween(250))+scaleIn(initialScale=.7f)+slideInVertically {it/6},exit=fadeOut(tween(250))+scaleOut(targetScale=.85f)) {
-   Box(Modifier.fillMaxSize().background(Color(0xB8000719)).clickable {focused=""},contentAlignment=Alignment.Center) {
-    GlassBox(when(focused){"weather"->"☁  Καιρός · Αθήνα";"calendar"->"▦  Ημερολόγιο";"notifications"->"♧  Ειδοποιήσεις";else->"⌂  Έξυπνες συσκευές"},Modifier.fillMaxWidth(.76f).fillMaxHeight(.8f),onExpand={focused=""}) {
-     when(focused) {
+  // Dim the dashboard separately from the horizontally travelling glass card.
+  AnimatedVisibility(
+   visible=focused.isNotEmpty(),
+   enter=fadeIn(tween(180)),
+   exit=fadeOut(tween(230))
+  ) {
+   Box(Modifier.fillMaxSize().background(Color(0xB8000719)).clickable {focused=""})
+  }
+  AnimatedContent(
+   targetState=focused,
+   transitionSpec={
+    val enteringFromLeft=targetState=="weather" || targetState=="calendar" || targetState=="mail"
+    val leavingToLeft=initialState=="weather" || initialState=="calendar" || initialState=="mail"
+    (slideInHorizontally(
+      initialOffsetX={ width -> if(enteringFromLeft) -width else width },
+      animationSpec=tween(390,easing=FastOutSlowInEasing)
+     )+fadeIn(tween(210))) togetherWith
+    (slideOutHorizontally(
+      targetOffsetX={ width -> if(leavingToLeft) -width else width },
+      animationSpec=tween(310,easing=FastOutSlowInEasing)
+     )+fadeOut(tween(190)))
+   },
+   label="panelWhoosh"
+  ) { panel ->
+   if(panel.isNotEmpty()) {
+    Box(Modifier.fillMaxSize(),contentAlignment=Alignment.Center) {
+    GlassBox(when(panel){"weather"->"☁  Καιρός · Αθήνα";"calendar"->"▦  Ημερολόγιο";"mail"->"✉  Gmail · johnyexoperience@gmail.com";"notifications"->"♧  Ειδοποιήσεις";else->"⌂  Έξυπνες συσκευές"},Modifier.fillMaxWidth(.76f).fillMaxHeight(.8f),onExpand={focused=""}) {
+     when(panel) {
       "weather"->{Text(weather,color=white,fontSize=54.sp);Text(weatherDetails,color=white);Spacer(Modifier.height(12.dp));Text("☀    ☁    🌧    ⛈",fontSize=36.sp);TextButton(onClick=onWeather){Text("Ανανέωση",color=aqua)}}
       "calendar"->{Text(date,color=white,fontSize=23.sp);Text("Τα συμβάντα Google Calendar απαιτούν εξουσιοδότηση OAuth.",color=white)}
+      "mail"->{
+       Text("Πρόσφατες ειδοποιήσεις Gmail",color=aqua,fontSize=20.sp)
+       Text("johnyexoperience@gmail.com",color=white,fontSize=14.sp)
+       Spacer(Modifier.height(9.dp))
+       val gmailAlerts=notifications.filter { it.contains("Gmail",ignoreCase=true) }.take(6)
+       if(gmailAlerts.isEmpty()) Text("Δεν υπάρχουν πρόσφατες ειδοποιήσεις Gmail. Για πλήρες inbox απαιτείται Google OAuth.",color=white)
+       else gmailAlerts.forEach { Text("• $it",color=white,fontSize=13.sp,maxLines=2);Spacer(Modifier.height(6.dp)) }
+       TextButton(onClick=onOpenMail){Text("Άνοιγμα Gmail / Εισερχόμενα",color=aqua)}
+       TextButton(onClick=onNotifications){Text("Άδεια ειδοποιήσεων",color=aqua)}
+      }
       "notifications"->{if(notifications.isEmpty()) Text("Δεν υπάρχουν διαθέσιμες ειδοποιήσεις.",color=white) else notifications.forEach {Text("• $it",color=white)};TextButton(onClick=onNotifications){Text("Διαχείριση πρόσβασης",color=aqua)}}
       else->{Text(deviceScan,color=white);devices.forEach {Text("• ${it.first} · ${it.second}",color=white,fontSize=12.sp)};TextButton(onClick=onDiscover){Text("Αναζήτηση Wi-Fi",color=aqua)}}
      }
@@ -146,6 +180,7 @@ fun GlassDashboard(status:String, heard:String, aiResponse:String, voicePanel:St
      TextButton(onClick={focused=""}){Text("✕ Κλείσιμο",color=white)}
     }
    }
+  }
   }
   if(settings) AlertDialog(onDismissRequest={settings=false},title={Text("Ρυθμίσεις JOHNA")},text={Column {
    Text(if(keyConfigured) "Groq API key αποθηκευμένο" else "Δεν υπάρχει Groq API key")

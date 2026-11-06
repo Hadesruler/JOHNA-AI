@@ -4,6 +4,7 @@ import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 import android.Manifest
 import android.content.Intent
+import android.net.Uri
 import android.content.ComponentName
 import android.provider.Settings
 import android.service.notification.NotificationListenerService
@@ -181,6 +182,23 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
    else -> null
   }
  }
+ private fun openExternalApp(kind: String) {
+  try {
+   val intent = when(kind) {
+    "mail" -> packageManager.getLaunchIntentForPackage("com.google.android.gm")
+     ?: Intent(Intent.ACTION_VIEW, Uri.parse("https://mail.google.com/mail/u/0/#inbox"))
+    "chrome" -> packageManager.getLaunchIntentForPackage("com.android.chrome")
+     ?: Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com"))
+    "camera" -> Intent("android.media.action.STILL_IMAGE_CAMERA")
+    else -> return
+   }
+   startActivity(intent)
+   status = "Άνοιγμα εφαρμογής · $kind"
+  } catch (e: Exception) {
+   aiResponse = "Δεν βρέθηκε εφαρμογή για $kind ή δεν επιτρέπεται το άνοιγμα."
+   status = "Αδυναμία ανοίγματος εφαρμογής"
+  }
+ }
  private fun handleVoiceCommand(words: String): Boolean {
   val q = java.text.Normalizer.normalize(words.lowercase(Locale("el", "GR")), java.text.Normalizer.Form.NFD)
    .replace(Regex("\\p{M}+"), "")
@@ -192,6 +210,11 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
    voicePanel = "close"; status = "Το παράθυρο έκλεισε"; aiResponse = "Έκλεισα το παράθυρο."; return true
   }
   if (open.none { it in q }) return false
+  if ("mail" in q || "gmail" in q || "email" in q || "ιμειλ" in q || "μεηλ" in q || "αλληλογραφ" in q) {
+   voicePanel="mail"; aiResponse="Εμφανίζω τις πρόσφατες ειδοποιήσεις Gmail. Για όλα τα μηνύματα πάτησε Άνοιγμα Gmail.";return true
+  }
+  if ("chrome" in q || "χρωμ" in q || "browser" in q || "περιηγητ" in q) {openExternalApp("chrome");return true}
+  if ("καμερ" in q || "φωτογραφικ" in q) {openExternalApp("camera");return true}
   val panel = when {
    "καιρ" in q || "προγνωσ" in q || "θερμοκρασ" in q -> "weather"
    "ειδοποι" in q -> "notifications"
@@ -323,17 +346,20 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
   NotificationBridge.onUpdate = { items -> main.post { notifications = items } }
   refreshWeather()
   setContent {
-   GlassDashboard(status, heard, aiResponse, voicePanel, { voicePanel = "" }, continuous, weather, weatherDetails, notifications, foundDevices.toList(), deviceScan, keyConfigured,
+   GlassDashboard(status, heard, aiResponse, voicePanel, { voicePanel = "" }, speaking, continuous, weather, weatherDetails, notifications, foundDevices.toList(), deviceScan, keyConfigured,
     onWeather = { refreshWeather() },
     onDiscover = { discoverDevices() },
     onSaveKey = { saveKey(it) },
     onClearHistory = { clearHistory() },
     onNotifications = { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) },
-    onContinuous = { enabled -> continuous = enabled; if (enabled) { active = true; requestListen() } else stopConversation() },
+    onContinuous = { enabled -> continuous = false; if (enabled) { active = true; requestListen() } else stopConversation() },
     onListen = { active = true; requestListen() },
     onStop = { stopConversation() },
     onHello = { active = false; speak("Γεια σου! Είμαι η Τζόνα. Είμαι έτοιμη.") },
-    onTestGroq = { active = false; askGroq("Απάντησε σύντομα στα ελληνικά: λειτουργείς;") })
+    onTestGroq = { active = false; askGroq("Απάντησε σύντομα στα ελληνικά: λειτουργείς;") },
+    onOpenMail = { openExternalApp("mail") },
+    onOpenChrome = { openExternalApp("chrome") },
+    onOpenCamera = { openExternalApp("camera") })
   }
  }
  override fun onInit(result: Int) {
@@ -381,6 +407,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
      val words = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty().trim()
      if (words.isBlank()) { if (active && continuous) main.postDelayed({ beginListening() }, 600); return }
      heard = ""
+     active = false; continuous = false
      askGroq(words)
     }
     override fun onPartialResults(partialResults: Bundle?) {
