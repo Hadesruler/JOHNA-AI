@@ -4,8 +4,5 @@
  <queries><intent><action android:name="android.speech.RecognitionService"/></intent><intent><action android:name="android.intent.action.TTS_SERVICE"/></intent></queries>
  <application android:label="JOHNA AI" android:theme="@android:style/Theme.Material.NoActionBar" android:usesCleartextTraffic="false">
   <activity android:name=".MainActivity" android:exported="true"><intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter></activity>
-  <service android:name=".JohnaNotificationListener" android:label="JOHNA notification assistant" android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE" android:exported="true">
-   <intent-filter><action android:name="android.service.notification.NotificationListenerService"/></intent-filter>
-  </service>
  </application>
 </manifest>
