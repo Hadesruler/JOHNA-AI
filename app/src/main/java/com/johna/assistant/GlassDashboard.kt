@@ -161,7 +161,7 @@ fun GlassDashboard(
       if (googleSignedIn && calendarEvents.isNotEmpty()) {
        Text(calendarEvents.first().let { "${it.startDisplay}: ${it.summary}" }, color = white.copy(alpha = .85f), fontSize = 11.sp, maxLines = 2)
       } else {
-       Text(if (googleSignedIn) "Δεν υπάρχουν προσεχή ραντεβού" else "Σύνδεσε Google για ραντεβού", color = white.copy(alpha = .85f), fontSize = 11.sp)
+       Text(if (googleSignedIn) "Δεν υπάρχουν προσεχή ραντεβού" else "Άνοιξε το Ημερολόγιο για ραντεβού", color = white.copy(alpha = .85f), fontSize = 11.sp)
       }
      }
     }
@@ -290,7 +290,7 @@ fun GlassDashboard(
           Text("Σύνδεση απαιτείται για εμφάνιση ραντεβού Google Calendar.", color = white)
           Spacer(Modifier.height(12.dp))
           Button(onClick = onGoogleSignIn, colors = ButtonDefaults.buttonColors(containerColor = Color(0xBB4285F4))) {
-           Text("Σύνδεση με Google")
+           Text("Άνοιγμα Gmail")
           }
          } else if (calendarEvents.isEmpty()) {
           Text("Δεν βρέθηκαν προσεχή ραντεβού.", color = white)
@@ -317,7 +317,7 @@ fun GlassDashboard(
           Text("Σύνδεση απαιτείται για πρόσβαση στο inbox.", color = white)
           Spacer(Modifier.height(12.dp))
           Button(onClick = onGoogleSignIn, colors = ButtonDefaults.buttonColors(containerColor = Color(0xBB4285F4))) {
-           Text("Σύνδεση με Google")
+           Text("Άνοιγμα Gmail")
           }
           Spacer(Modifier.height(8.dp))
           TextButton(onClick = onOpenMail) { Text("Άνοιγμα Gmail app", color = aqua) }
@@ -348,7 +348,7 @@ fun GlassDashboard(
         "notifications" -> {
          if (notifications.isEmpty()) Text("Δεν υπάρχουν διαθέσιμες ειδοποιήσεις.", color = white)
          else notifications.forEach { Text("• $it", color = white); Spacer(Modifier.height(4.dp)) }
-         TextButton(onClick = onNotifications) { Text("Διαχείριση πρόσβασης", color = aqua) }
+         TextButton(onClick = onNotifications) { Text("Πρόσβαση ειδοποιήσεων ανενεργή", color = aqua) }
         }
 
         else -> { // devices
@@ -386,8 +386,8 @@ fun GlassDashboard(
      OutlinedTextField(keyDraft, { keyDraft = it }, label = { Text("Νέο Groq API key") }, singleLine = true)
      TextButton(onClick = { if (keyDraft.isNotBlank()) onSaveKey(keyDraft.trim()); keyDraft = "" }) { Text("Αποθήκευση κρυπτογραφημένα") }
      HorizontalDivider()
-     Text(if (googleSignedIn) "✅ Google: Συνδεδεμένος" else "○ Google: Μη συνδεδεμένος")
-     Button(onClick = onGoogleSignIn, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4285F4))) { Text("Σύνδεση με Google (Gmail + Calendar)") }
+     Text(if (googleSignedIn) "✅ Google: Συνδεδεμένος" else "Google σύνδεση μέσα στη JOHNA: ανενεργή")
+     Button(onClick = onGoogleSignIn, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4285F4))) { Text("Άνοιγμα επίσημης εφαρμογής Gmail") }
      HorizontalDivider()
      Text("SHA-1 υπογραφής (για Google Cloud Console):", fontSize = 11.sp)
      Text(appSha1, fontSize = 10.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)

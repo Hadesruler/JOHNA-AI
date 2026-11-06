@@ -10,8 +10,8 @@ android {
   applicationId = "com.johna.assistant"
   minSdk = 26
   targetSdk = 35
-  versionCode = 109
-  versionName = "1.0.9"
+  versionCode = 110
+  versionName = "1.0.10-safe"
  }
  // Stable debug signing for CI. Never commit a keystore or passwords.
  val keystorePath = System.getenv("JOHNA_KEYSTORE_PATH")
@@ -47,7 +47,5 @@ dependencies {
  implementation("androidx.compose.foundation:foundation")
  implementation("androidx.compose.material3:material3")
  implementation("androidx.compose.ui:ui-tooling-preview")
- // Google Sign-In + OAuth2 token API (for Gmail / Calendar)
- implementation("com.google.android.gms:play-services-auth:21.2.0")
  debugImplementation("androidx.compose.ui:ui-tooling")
 }

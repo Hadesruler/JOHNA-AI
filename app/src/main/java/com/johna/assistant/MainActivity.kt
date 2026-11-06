@@ -1,7 +1,6 @@
 package com.johna.assistant
 
 import android.Manifest
-import android.app.Notification
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -14,8 +13,6 @@ import android.os.Looper
 import android.provider.Settings
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
-import android.service.notification.NotificationListenerService
-import android.service.notification.StatusBarNotification
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
@@ -26,10 +23,6 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.*
-import com.google.android.gms.auth.GoogleAuthUtil
-import com.google.android.gms.auth.UserRecoverableAuthException
-import com.google.android.gms.auth.api.signin.GoogleSignIn
-import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
@@ -68,7 +61,6 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
  private var apiKey          by mutableStateOf("")
  private var keyConfigured   by mutableStateOf(false)
  private var googleSignedIn  by mutableStateOf(false)
- private var googleToken     = ""
 
  private val history       = mutableStateListOf<Pair<String, String>>()
  private val notifications = mutableStateListOf<String>()
@@ -84,24 +76,6 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
  private var lastWeatherUpdate = 0L
 
  private val conversationFile by lazy { java.io.File(filesDir, "johna_conversation.json") }
-
- // ─── Google Sign-In launchers ────────────────────────────────────────────
-
- private val signInLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-  if (result.resultCode == RESULT_OK) {
-   GoogleSignIn.getSignedInAccountFromIntent(result.data)
-    .addOnSuccessListener { account ->
-     googleSignedIn = true
-     status = "Google: ${account.email}"
-     fetchGoogleData()
-    }
-    .addOnFailureListener { e -> status = "Sign-in απέτυχε: ${e.message?.take(80)}" }
-  }
- }
-
- private val googleAuthLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-  if (it.resultCode == RESULT_OK) fetchGoogleData()
- }
 
  // ─── Permission ──────────────────────────────────────────────────────────
 
@@ -123,13 +97,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
    override fun onDone(id: String?)   { main.post { speaking = false; onTtsDone() } }
    override fun onError(id: String?)  { main.post { speaking = false } }
   })
-
-  NotificationBridge.onUpdate = { items -> main.post { notifications.clear(); notifications.addAll(items) } }
   refreshWeather()
-
-  // Check for existing Google sign-in
-  val existingAccount = GoogleSignIn.getLastSignedInAccount(this)
-  if (existingAccount != null) { googleSignedIn = true; fetchGoogleData() }
 
   val sha1 = getAppSha1()
 
@@ -154,7 +122,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     calendarEvents = calendarEvents.toList(),
     onWeather      = { refreshWeather() },
     onDiscover     = { discoverDevices() },
-    onNotifications = { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) },
+    onNotifications = { status = "Ειδοποιήσεις: η πρόσβαση είναι απενεργοποιημένη" },
     onListen       = { active = true; requestListen() },
     onStop         = { stopConversation() },
     onContinuous   = { enabled -> continuous = false; if (enabled) { active = true; requestListen() } else stopConversation() },
@@ -165,7 +133,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     onOpenMail     = { openExternalApp("mail") },
     onOpenChrome   = { openExternalApp("chrome") },
     onOpenCamera   = { openExternalApp("camera") },
-    onGoogleSignIn = { signInToGoogle() },
+    onGoogleSignIn = { openExternalApp("mail") },
     appSha1        = sha1
    )
   }
@@ -182,42 +150,8 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
  override fun onDestroy() {
   val nsd = getSystemService(NSD_SERVICE) as NsdManager
   discoveries.forEach { try { nsd.stopServiceDiscovery(it) } catch (_: Exception) {} }
-  NotificationBridge.onUpdate = null
   active = false; recognizer?.destroy(); tts?.stop(); tts?.shutdown()
   super.onDestroy()
- }
-
- // ─── Google Sign-In ───────────────────────────────────────────────────────
-
- private fun signInToGoogle() {
-  val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
-   .requestEmail()
-   .build()
-  signInLauncher.launch(GoogleSignIn.getClient(this, gso).signInIntent)
- }
-
- private fun fetchGoogleData() {
-  val account = GoogleSignIn.getLastSignedInAccount(this)?.account ?: return
-  status = "Google: Λήψη δεδομένων..."
-  Thread {
-   try {
-    val scopes = "oauth2:${GoogleServices.GMAIL_SCOPE} ${GoogleServices.CALENDAR_SCOPE}"
-    val token = GoogleAuthUtil.getToken(this, account, scopes)
-    googleToken = token
-    val msgs   = GoogleServices.fetchInbox(token)
-    val events = GoogleServices.fetchUpcomingEvents(token)
-    main.post {
-     gmailMessages.clear();  gmailMessages.addAll(msgs)
-     calendarEvents.clear(); calendarEvents.addAll(events)
-     status = "Gmail: ${msgs.size} μηνύματα · ${events.size} ραντεβού"
-    }
-   } catch (e: UserRecoverableAuthException) {
-    val recoverIntent = e.intent ?: return@Thread
-    main.post { googleAuthLauncher.launch(recoverIntent) }
-   } catch (e: Exception) {
-    main.post { status = "Google: ${e.javaClass.simpleName}" }
-   }
-  }.start()
  }
 
  /** Returns the SHA-1 of the app's signing certificate, formatted as colon-separated hex. */
@@ -331,9 +265,9 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
      gmailMessages.take(2).joinToString(". ") { "Από ${it.from}: ${it.subject}" }
     aiResponse = answer; speak(answer)
    } else if (googleSignedIn) {
-    aiResponse = "Φορτώνω τα email..."; fetchGoogleData()
+    aiResponse = "Το Gmail είναι διαθέσιμο από την επίσημη εφαρμογή."
    } else {
-    aiResponse = "Πάτα Σύνδεση με Google στο panel για πρόσβαση στο Gmail."
+    aiResponse = "Για ασφαλή πρόσβαση στα μηνύματα ανοίγω την επίσημη εφαρμογή Gmail."; openExternalApp("mail")
    }
    return true
   }
@@ -356,9 +290,9 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
      calendarEvents.take(3).joinToString(". ") { "${it.startDisplay}: ${it.summary}" }
     aiResponse = answer; speak(answer)
    } else if (googleSignedIn) {
-    aiResponse = "Φορτώνω ραντεβού..."; fetchGoogleData()
+    aiResponse = "Το Ημερολόγιο είναι διαθέσιμο από την επίσημη εφαρμογή."
    } else {
-    aiResponse = "Σύνδεσε το Google account σου για πρόσβαση στο Calendar."
+    aiResponse = "Για τα ραντεβού σου ανοίγω την επίσημη εφαρμογή Ημερολογίου."; openExternalApp("calendar")
    }
    return true
   }
@@ -591,7 +525,8 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                  ?: Intent(Intent.ACTION_VIEW, Uri.parse("https://mail.google.com/mail/u/0/#inbox"))
     "chrome" -> packageManager.getLaunchIntentForPackage("com.android.chrome")
                  ?: Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com"))
-    "camera" -> Intent("android.media.action.STILL_IMAGE_CAMERA")
+     "camera" -> Intent("android.media.action.STILL_IMAGE_CAMERA")
+     "calendar" -> Intent(Intent.ACTION_VIEW, Uri.parse("content://com.android.calendar/time/" + System.currentTimeMillis()))
     else -> return
    }
    startActivity(intent); status = "Άνοιγμα: $kind"
@@ -653,26 +588,3 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
  private fun clearHistory() { history.clear(); conversationFile.delete(); status = "Η μνήμη διαγράφηκε" }
 }
 
-// ─── Notification bridge ─────────────────────────────────────────────────────
-
-object NotificationBridge {
- @Volatile var onUpdate: ((List<String>) -> Unit)? = null
-}
-
-class JohnaNotificationListener : NotificationListenerService() {
- private val recent = LinkedHashMap<String, String>()
- override fun onListenerConnected() { super.onListenerConnected(); activeNotifications?.forEach { add(it) }; publish() }
- override fun onNotificationPosted(sbn: StatusBarNotification?)  { if (sbn != null) { add(sbn); publish() } }
- override fun onNotificationRemoved(sbn: StatusBarNotification?) { if (sbn != null) { recent.remove(sbn.key); publish() } }
- private fun add(sbn: StatusBarNotification) {
-  if (sbn.packageName == packageName) return
-  val extras = sbn.notification.extras
-  val title   = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty()
-  val message = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString().orEmpty()
-  if (title.isBlank() && message.isBlank()) return
-  val label = try { packageManager.getApplicationLabel(packageManager.getApplicationInfo(sbn.packageName, 0)).toString() } catch (_: Exception) { sbn.packageName }
-  recent[sbn.key] = "$label · $title: $message".take(180)
-  while (recent.size > 30) recent.remove(recent.keys.first())
- }
- private fun publish() { NotificationBridge.onUpdate?.invoke(recent.values.toList().asReversed()) }
-}
