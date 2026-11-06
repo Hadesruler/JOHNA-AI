@@ -145,29 +145,54 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
       "Είσαι η JOHNA, φιλική έξυπνη φωνητική βοηθός. Απάντησε στα ελληνικά, φυσικά και σύντομα (συνήθως 1-3 προτάσεις). Μην ισχυρίζεσαι ότι χειρίζεσαι συσκευές αν δεν έχεις πρόσβαση."))))
      .put("contents",contents)
      .put("generationConfig",JSONObject().put("maxOutputTokens",400))
-    val conn = URL("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent").openConnection() as HttpURLConnection
-    try {
-     conn.requestMethod = "POST"; conn.connectTimeout = 10000; conn.readTimeout = 25000
-     conn.setRequestProperty("Content-Type","application/json")
-     conn.setRequestProperty("x-goog-api-key",key)
-     conn.doOutput = true
-     conn.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
-     val code = conn.responseCode
-     if (code !in 200..299) {
-      reply = when (code) {
-       400 -> "Το αίτημα AI δεν έγινε δεκτό."
-       401,403 -> "Το κλειδί Gemini δεν έγινε δεκτό. Έλεγξε το API key."
-       429 -> "Φτάσαμε προσωρινά το δωρεάν όριο του Gemini."
-       else -> "Το Gemini δεν απάντησε. Σφάλμα $code."
-      }
-     } else {
-      val json = JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
-      val parts = json.getJSONArray("candidates").getJSONObject(0).getJSONObject("content").getJSONArray("parts")
-      reply = (0 until parts.length()).mapNotNull { i -> parts.getJSONObject(i).optString("text").takeIf { it.isNotBlank() } }.joinToString(" ").trim()
-      success = reply.isNotBlank()
-      if (!success) reply = "Δεν πήρα απάντηση. Μπορείς να επαναλάβεις;"
+    // Retry transient failures, then switch to a lighter available model.
+    val models = listOf("gemini-3.8-flash", "gemini-3.1-flash-lite", "gemini-3.5-flash-lite")
+    var lastCode = 0
+    var lastMessage = ""
+    var finished = false
+    for (model in models) {
+     if (finished) break
+     for (attempt in 0..1) {
+      val conn = URL("https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent").openConnection() as HttpURLConnection
+      try {
+       conn.requestMethod = "POST"; conn.connectTimeout = 8000; conn.readTimeout = 18000
+       conn.setRequestProperty("Content-Type", "application/json; charset=utf-8")
+       conn.setRequestProperty("x-goog-api-key", key)
+       conn.doOutput = true
+       conn.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
+       val code = conn.responseCode
+       lastCode = code
+       if (code in 200..299) {
+        val json = JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
+        val candidates = json.optJSONArray("candidates")
+        val parts = candidates?.optJSONObject(0)?.optJSONObject("content")?.optJSONArray("parts")
+        val answer = if (parts == null) "" else (0 until parts.length()).mapNotNull { i ->
+         parts.optJSONObject(i)?.optString("text")?.takeIf { it.isNotBlank() }
+        }.joinToString(" ").trim()
+        if (answer.isNotBlank()) { reply = answer; success = true; finished = true; break }
+        lastMessage = "Κενή απάντηση από το μοντέλο"
+       } else {
+        val errorText = (conn.errorStream?.bufferedReader()?.use { it.readText() } ?: "")
+        lastMessage = try { JSONObject(errorText).optJSONObject("error")?.optString("message") ?: "" } catch (_: Exception) { "" }
+        // Invalid credentials or malformed request cannot be fixed by switching models.
+        if (code == 400 || code == 401 || code == 403) { finished = true; break }
+        // For 404, 429, 503 and other server errors, try the next model.
+       }
+      } catch (_: java.io.IOException) {
+       lastMessage = "Πρόβλημα δικτύου"
+      } finally { conn.disconnect() }
+      if (attempt == 0 && !finished) Thread.sleep(800)
      }
-    } finally { conn.disconnect() }
+    }
+    if (!success) {
+     reply = when (lastCode) {
+      401, 403 -> "Το Gemini API key δεν έχει πρόσβαση. Έλεγξε τις ρυθμίσεις AI."
+      400 -> "Το Gemini απέρριψε το αίτημα. Χρειάζεται έλεγχος ρυθμίσεων."
+      429 -> "Το δωρεάν όριο AI εξαντλήθηκε προσωρινά. Δοκίμασε αργότερα."
+      503 -> "Τα μοντέλα AI είναι προσωρινά απασχολημένα. Δοκίμασε σε λίγο."
+      else -> "Δεν πήρα απάντηση από το AI. ${if (lastCode != 0) "Κωδικός $lastCode" else lastMessage}."
+     }
+    }
    } catch (_: Exception) { reply = "Δεν μπόρεσα να συνδεθώ με το Gemini. Έλεγξε το Internet." }
    main.post {
     if (generation != requestGeneration || isDestroyed) return@post
@@ -325,7 +350,7 @@ fun JohnaScreen(status: String, heard: String, continuous: Boolean,
    Column { Text(clock, color=Color.White, fontSize=25.sp, fontWeight=FontWeight.Bold); Text(date, color=cyan, fontSize=11.sp) }
    Column(horizontalAlignment=Alignment.CenterHorizontally) {
     Text("JOHNA AI", color=Color(0xFFF2D8FF), fontSize=if(narrow) 24.sp else 33.sp, fontWeight=FontWeight.Bold, letterSpacing=2.sp)
-    Text("HOME COMMAND CENTER · v0.5", color=muted, fontSize=9.sp)
+    Text("HOME COMMAND CENTER · v0.5.3", color=muted, fontSize=9.sp)
    }
    Text("◉  EL", color=cyan, fontSize=13.sp)
   }

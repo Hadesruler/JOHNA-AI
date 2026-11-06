@@ -9,3 +9,5 @@ This is an Android source project, not a prebuilt APK. Not compiled/tested in th
 Push project to GitHub and use `.github/workflows/build-apk.yml` to build debug APK; check Actions logs and artifacts.
 
 JOHNA v0.5: Gemini API settings in-app, Android Keystore encrypted API key, hidden local conversation memory. No API key is bundled.
+
+JOHNA v0.5.3: Gemini 3.8 Flash with retries and fallback to 3.1 Flash Lite and 3.5 Flash Lite.
