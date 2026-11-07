@@ -10,8 +10,8 @@ android {
   applicationId = "com.johna.assistant"
   minSdk = 26
   targetSdk = 35
-  versionCode = 116
-  versionName = "1.0.15"
+  versionCode = 118
+  versionName = "1.0.17"
  }
  // Stable debug signing for CI. Never commit a keystore or passwords.
  val keystorePath = System.getenv("JOHNA_KEYSTORE_PATH")
@@ -46,6 +46,7 @@ dependencies {
  implementation("androidx.compose.ui:ui")
  implementation("androidx.compose.foundation:foundation")
  implementation("androidx.compose.material3:material3")
+ implementation("androidx.compose.material:material-icons-extended")
  implementation("androidx.compose.ui:ui-tooling-preview")
  debugImplementation("androidx.compose.ui:ui-tooling")
 }

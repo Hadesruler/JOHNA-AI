@@ -1,5 +1,7 @@
 package com.johna.assistant
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
@@ -37,9 +39,9 @@ private fun GlassBox(
 ) {
  Column(
   modifier
-   .shadow(10.dp, RoundedCornerShape(24.dp), ambientColor = Color.Black, spotColor = Color.Black)
-   .border(1.dp, Brush.linearGradient(listOf(Color.White.copy(alpha = .22f), lavender.copy(alpha = .14f), aqua.copy(alpha = .22f))), RoundedCornerShape(24.dp))
-   .background(Brush.verticalGradient(listOf(Color(0x77223454), Color(0x9B101D39))), RoundedCornerShape(24.dp))
+   .shadow(17.dp, RoundedCornerShape(24.dp), ambientColor = Color.Black, spotColor = Color.Black)
+   .border(1.dp, Brush.linearGradient(listOf(aqua.copy(alpha = .82f), lavender.copy(alpha = .53f), aqua.copy(alpha = .66f))), RoundedCornerShape(24.dp))
+   .background(Brush.verticalGradient(listOf(Color(0xF0122D56), Color(0xF20A1532))), RoundedCornerShape(24.dp))
    .clickable { onExpand() }
    .padding(15.dp)
  ) {
@@ -98,6 +100,7 @@ fun GlassDashboard(
  onOpenCamera: () -> Unit,
  onOpenSmartHome: () -> Unit,
  onGoogleSignIn: () -> Unit,
+ onVoiceShortcut: (String) -> Unit,
  appSha1: String
 ) {
  var focused  by remember { mutableStateOf("") }
@@ -153,151 +156,22 @@ fun GlassDashboard(
  val infinite = rememberInfiniteTransition(label = "orb")
  val pulse    by infinite.animateFloat(.97f, 1.025f, infiniteRepeatable(tween(2500), RepeatMode.Reverse), label = "pulse")
 
- Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0xFF08101F),Color(0xFF0B1630),Color(0xFF040912))))) {
-  if (ambientEnabled) {
-   AmbientLivingBackdrop(accent = accent, speaking = speaking, listening = listening, modifier = Modifier.fillMaxSize())
-  }
-  Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0x140A1C33), Color(0x04060D25), Color(0x66040B1E)))))
-
-  Column(Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 10.dp)) {
-
-   // ── Header ──────────────────────────────────────────────────────────────
-   Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-    Column { Text(time, color = white, fontSize = 30.sp, fontWeight = FontWeight.Light); Text(date, color = white, fontSize = 11.sp) }
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-     Text("J O H N A", color = white, fontSize = 26.sp, fontWeight = FontWeight.Light, letterSpacing = 3.sp)
-     Text("ETHEREAL ASSISTANT · v1.0.15", color = accent.copy(alpha = .8f), fontSize = 10.sp)
-    }
-    Row(verticalAlignment = Alignment.CenterVertically) {
-     Text("◈", color = accent, modifier = Modifier.clickable { theme = (theme + 1) % 4; prefs.edit().putInt("theme", theme).apply() }.padding(9.dp), fontSize=20.sp)
-     Text("⚙", color = white, modifier = Modifier.clickable { settings = true }.padding(9.dp), fontSize=19.sp)
-    }
-   }
-
-   Spacer(Modifier.height(12.dp))
-
-   // ── Three-column layout ──────────────────────────────────────────────────
-   Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-
-    // Left column
-    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-     GlassBox("☁  Καιρός · Αθήνα", Modifier.weight(1f), onExpand = { focused = "weather" }) {
-      val today = weatherForecast?.days?.firstOrNull()
-      val isNight = today != null && (weatherForecast!!.updated < today.sunrise || weatherForecast!!.updated >= today.sunset)
-      Text(if (weather.contains("°")) "${if (isNight) "☾" else "☀"}  $weather" else "☁  $weather", color = white, fontSize = 33.sp, fontWeight = FontWeight.Light)
-      Text(weatherDetails, color = white.copy(alpha = .85f), fontSize = 11.sp, maxLines = 2)
-      Spacer(Modifier.weight(1f)); Text("☀       ☁       🌧       ⛈", color = accent, fontSize = 20.sp)
-      Text("Πρόγνωση καιρού", color = white.copy(alpha = .75f), fontSize = 11.sp)
-     }
-     GlassBox("▦  Ημερολόγιο", Modifier.weight(.9f), onExpand = { focused = "calendar" }) {
-      Text(date, color = white, fontSize = 14.sp); Spacer(Modifier.height(10.dp))
-      if (googleSignedIn && calendarEvents.isNotEmpty()) {
-       Text(calendarEvents.first().let { "${it.startDisplay}: ${it.summary}" }, color = white.copy(alpha = .85f), fontSize = 11.sp, maxLines = 2)
-      } else {
-       Text(if (googleSignedIn) "Δεν υπάρχουν προσεχή ραντεβού" else "Άνοιξε το Ημερολόγιο για ραντεβού", color = white.copy(alpha = .85f), fontSize = 11.sp)
-      }
-     }
-    }
-
-    // Centre column — orb
-    Column(Modifier.weight(1.36f), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-     JohnaSphere(
-      speaking = speaking,
-      listening = listening,
-      voiceEnergy = micEnergy,
-      modifier = Modifier
-       .fillMaxWidth(.90f)
-       .aspectRatio(1f)
-       .graphicsLayer { scaleX = pulse; scaleY = pulse }
-       .clickable { onListen() }
-     )
-     Text(status, color = white, fontSize = 16.sp, fontWeight = FontWeight.Medium)
-     AnimatedContent(targetState = volumeLevel, label = "mediaLevel") { level ->
-      Row(verticalAlignment = Alignment.CenterVertically) {
-       Text("MEDIA  ", color = accent, fontSize = 10.sp)
-       repeat(10) { n ->
-        Box(Modifier.padding(horizontal = 1.dp).width(7.dp).height(5.dp)
-         .background(if (n < level) aqua else Color(0x447B8BA3), RoundedCornerShape(2.dp)))
-       }
-       Text("  $level/10", color = white.copy(alpha = .8f), fontSize = 10.sp)
-      }
-     }
-     Text(
-      aiResponse,
-      color = aqua, fontSize = 12.sp, textAlign = TextAlign.Center,
-      modifier = Modifier.fillMaxWidth().heightIn(max = 105.dp).verticalScroll(rememberScrollState())
-     )
-     Spacer(Modifier.height(12.dp))
-     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-      Button(onClick = onListen, colors = ButtonDefaults.buttonColors(containerColor = Color(0xBB7555C6))) {
-       Text(if (listening) "🎙  Ακούω..." else "🎙  Μίλα στη Johna")
-      }
-      OutlinedButton(onClick = { onContinuous(!continuous) }) {
-       Text(if (continuous) "Wake ON" else "Wake: Johna", color = if (continuous) aqua else white)
-      }
-      OutlinedButton(onClick = onStop) { Text("Στοπ", color = white) }
-     }
-     Text("Hey Johna · foreground wake (πειραματικό)", color = white.copy(alpha = .58f), fontSize = 10.sp)
-    }
-
-    // Right column
-    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-     GlassBox("♧  Ειδοποιήσεις (${notifications.size})", Modifier.weight(1f), onExpand = { focused = "notifications" }) {
-      if (notifications.isEmpty()) Text("Δεν υπάρχουν διαθέσιμες ειδοποιήσεις ή δεν έχει δοθεί άδεια", color = white.copy(alpha = .8f), fontSize = 12.sp)
-      else notifications.take(3).forEach { Text("• $it", color = white, fontSize = 12.sp, maxLines = 2); Spacer(Modifier.height(7.dp)) }
-     }
-     GlassBox("⌂  Smart Home", Modifier.weight(.9f), onExpand = { focused = "devices" }) {
-      Text("${devices.size} υπηρεσίες δικτύου", color = white, fontSize = 14.sp)
-      Text(deviceScan, color = white.copy(alpha = .8f), fontSize = 11.sp, maxLines = 2)
-      Text("Άνοιγμα Google Home / Home Assistant", color = accent, fontSize = 11.sp, modifier = Modifier.clickable { onOpenSmartHome() })
-      Spacer(Modifier.height(7.dp)); Text("◉  Αναζήτηση συσκευών", color = accent, fontSize = 12.sp, modifier = Modifier.clickable { onDiscover() })
-     }
-    }
-   }
-
-   Spacer(Modifier.height(14.dp))
-
-   // ── Floating minimal dock: replaces the oversized rectangular tiles ──
-   Row(
-    Modifier.align(Alignment.CenterHorizontally)
-     .fillMaxWidth(.83f)
-     .height(62.dp)
-     .shadow(18.dp, RoundedCornerShape(38.dp))
-     .border(1.dp, accent.copy(alpha=.24f), RoundedCornerShape(38.dp))
-     .background(Color(0xD2111D34), RoundedCornerShape(38.dp))
-     .padding(horizontal=12.dp, vertical=5.dp),
-    horizontalArrangement = Arrangement.spacedBy(2.dp),
-    verticalAlignment = Alignment.CenterVertically
-   ) {
-    listOf(
-     "◎" to "Μίλα", "☁" to "Καιρός", "▦" to "Ημερολόγιο",
-     "⌂" to "Σπίτι", "◫" to "Apps", "✉" to "Mail"
-    ).forEachIndexed { index, item ->
-     val activeScale by animateFloatAsState(if (selectedDock == index) 1.08f else 1f,label="dockFloat$index")
-     Column(
-      Modifier.weight(1f).fillMaxHeight()
-       .graphicsLayer {scaleX=activeScale;scaleY=activeScale}
-       .background(if(selectedDock==index)accent.copy(alpha=.15f)else Color.Transparent,RoundedCornerShape(28.dp))
-       .clickable {
-        selectedDock=index
-        when(index) {
-         0 -> onListen()
-         1 -> focused="weather"
-         2 -> focused="calendar"
-         3 -> focused="devices"
-         4 -> focused="apps"
-         5 -> focused="mail"
-        }
-       },
-      horizontalAlignment=Alignment.CenterHorizontally,
-      verticalArrangement=Arrangement.Center
-     ) {
-      Text(item.first,color=if(index==0)accent else white.copy(alpha=.85f),fontSize=19.sp)
-      Text(item.second,color=white.copy(alpha=.75f),fontSize=9.sp)
-     }
-    }
-   }
-  }
+ BackHandler(enabled=focused.isNotEmpty() || settings) { focused=""; settings=false }
+ Box(Modifier.fillMaxSize()) {
+  HolographicHome(
+   status=status, aiResponse=aiResponse, speaking=speaking, listening=listening,
+   micEnergy=micEnergy, volumeLevel=volumeLevel, continuous=continuous,
+   weather=weather, weatherDetails=weatherDetails, forecast=weatherForecast,
+   notifications=notifications, calendarEvents=calendarEvents, googleSignedIn=googleSignedIn,
+   devices=devices, deviceScan=deviceScan, installedApps=installedApps,
+   ambientEnabled=ambientEnabled, themeAccent=accent,
+   onExpand={ target -> if(target=="close") { focused=""; settings=false } else { settings=false;focused=target } },
+   onSettings={settings=true},
+   onThemes={ theme=(theme+1)%4; prefs.edit().putInt("theme",theme).apply() },
+   onListen=onListen, onWake={onContinuous(!continuous)}, onStop=onStop,
+   onWeather=onWeather,onDiscover=onDiscover,onHomeController=onOpenSmartHome,
+   onMail=onOpenMail,onChrome=onOpenChrome,onQuickCommand=onVoiceShortcut,onLaunchApp=onLaunchApp
+  )
 
   // ── Dim overlay ──────────────────────────────────────────────────────────
   AnimatedVisibility(visible = focused.isNotEmpty(), enter = fadeIn(tween(180)), exit = fadeOut(tween(230))) {
@@ -321,7 +195,7 @@ fun GlassDashboard(
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
      GlassBox(
       when (panel) {
-       "weather"       -> "☁  Καιρός · Αθήνα"
+       "weather"       -> "☁  Καιρός · ${weatherForecast?.city ?: "Αθήνα"}"
        "calendar"      -> "▦  Ημερολόγιο Google"
        "mail"          -> "✉  Gmail · johnyexoperience@gmail.com"
        "notifications" -> "♧  Ειδοποιήσεις"
@@ -406,8 +280,18 @@ fun GlassDashboard(
          Text("Ανοίγουν μέσα από τον ασφαλή Android launcher. Κάθε εφαρμογή διατηρεί το δικό της περιβάλλον και δικαιώματα.",color=white.copy(alpha=.75f),fontSize=11.sp)
          OutlinedTextField(value=appFilter,onValueChange={appFilter=it;lastPanelInteraction++},label={Text("Αναζήτηση εφαρμογής")},singleLine=true,modifier=Modifier.fillMaxWidth())
          installedApps.filter { it.title.contains(appFilter,ignoreCase=true) }.take(45).forEach { app ->
-          TextButton(onClick={lastPanelInteraction++;onLaunchApp(app.packageName)}) {
-           Text("◉  ${app.title}",color=white,fontSize=14.sp)
+          Row(Modifier.fillMaxWidth().padding(vertical=3.dp)
+            .background(Color(0x66315886),RoundedCornerShape(14.dp))
+            .clickable { focused="";onLaunchApp(app.packageName) }
+            .padding(horizontal=12.dp,vertical=7.dp),verticalAlignment=Alignment.CenterVertically) {
+           AndroidView(factory={ctx -> android.widget.ImageView(ctx).apply {
+             scaleType=android.widget.ImageView.ScaleType.FIT_CENTER
+           }},update={view -> runCatching {
+             view.setImageDrawable(view.context.packageManager.getApplicationIcon(app.packageName))
+           }},modifier=Modifier.size(29.dp))
+           Spacer(Modifier.width(12.dp))
+           Text(app.title,color=white,fontSize=13.sp,modifier=Modifier.weight(1f))
+           Text("Άνοιγμα ↗",color=aqua,fontSize=11.sp)
           }
          }
         }

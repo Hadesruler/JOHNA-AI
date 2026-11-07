@@ -60,6 +60,10 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
  private var wakeEnabled by mutableStateOf(false)
  private var awaitingWakeCommand = false
  private var wakeRetries = 0
+ private var preferOnDeviceRecognition=true
+ private var usingOnDeviceRecognizer=false
+ private var disconnectCount=0
+ private var disconnectWindowStart=0L
  private var wakeRestart: Runnable? = null
  private var foreground = true
  private var errors       = 0
@@ -170,6 +174,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     onOpenCamera   = { openExternalApp("camera") },
     onOpenSmartHome = { openExternalApp("smarthome") },
     onGoogleSignIn = { openExternalApp("mail") },
+    onVoiceShortcut = { command -> if (!handleVoiceCommand(command)) askGroq(command) },
     appSha1        = sha1
    )
   }
@@ -311,6 +316,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
   wakeEnabled = enabled
   continuous = false
   wakeRetries = 0
+  disconnectCount=0; disconnectWindowStart=0L
   awaitingWakeCommand = false
   if (enabled) {
    active = true
@@ -339,7 +345,17 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
   recognizer?.destroy(); recognizer = null
   listening = true
   micEnergy = 0f
-  recognizer = SpeechRecognizer.createSpeechRecognizer(this).also { sr ->
+  // Prefer locally-installed recognition (API 31+) before using a network recognizer.
+  val speechEngine = try {
+   usingOnDeviceRecognizer = preferOnDeviceRecognition &&
+     Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && SpeechRecognizer.isOnDeviceRecognitionAvailable(this)
+   if (usingOnDeviceRecognizer) SpeechRecognizer.createOnDeviceSpeechRecognizer(this)
+   else SpeechRecognizer.createSpeechRecognizer(this)
+  } catch (_: Exception) {
+   usingOnDeviceRecognizer=false
+   SpeechRecognizer.createSpeechRecognizer(this)
+  }
+  recognizer = speechEngine.also { sr ->
    sr.setRecognitionListener(object : RecognitionListener {
     override fun onReadyForSpeech(p: Bundle?) { status = "Σε ακούω..." }
     override fun onBeginningOfSpeech()         { status = "Ακούω..." }
@@ -352,13 +368,31 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     override fun onError(error: Int) {
      listening=false
      micEnergy=0f
+     if (usingOnDeviceRecognizer && (error == SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED ||
+        error == SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE)) {
+      // A recognizer can be present without an offline Greek language pack.
+      preferOnDeviceRecognition=false
+      status="Η offline ελληνική αναγνώριση δεν είναι διαθέσιμη · χρήση Android STT"
+      if (wakeEnabled && foreground) scheduleWakeRestart(1200L)
+      else if (active && foreground) main.postDelayed({ beginListening() }, 600L)
+      return
+     }
      val recoverable = error == SpeechRecognizer.ERROR_NO_MATCH ||
        error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT ||
        error == SpeechRecognizer.ERROR_SERVER_DISCONNECTED ||
        error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY ||
        error == SpeechRecognizer.ERROR_NETWORK ||
        error == SpeechRecognizer.ERROR_NETWORK_TIMEOUT
-     if (wakeEnabled && foreground && recoverable) {
+     if (error == SpeechRecognizer.ERROR_SERVER_DISCONNECTED) {
+      val nowMs=System.currentTimeMillis()
+      if (nowMs-disconnectWindowStart > 60_000L) { disconnectWindowStart=nowMs; disconnectCount=0 }
+      disconnectCount++
+     }
+     if (error == SpeechRecognizer.ERROR_SERVER_DISCONNECTED && disconnectCount >= 3) {
+      // Circuit breaker: don't hammer the disconnected Android recognition service.
+      cancelWakeRestart(); wakeEnabled=false; active=false; awaitingWakeCommand=false
+      status="Wake σε παύση: η αναγνώριση Android αποσυνδέθηκε (11). Πάτησε Μίλα."
+     } else if (wakeEnabled && foreground && recoverable) {
       wakeRetries++
       if (wakeRetries <= 4) {
        val waitMs = when (wakeRetries) {1->1500L;2->3000L;3->5500L;else->8500L}
@@ -383,11 +417,11 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
       val stripped = removeWakePrefix(words)
       when {
        awaitingWakeCommand && words.isNotBlank() -> {
-        awaitingWakeCommand = false; wakeRetries = 0
+        awaitingWakeCommand = false; wakeRetries = 0; disconnectCount=0
         active = false; askGroq(words)
        }
        stripped != null -> {
-        wakeRetries = 0
+        wakeRetries = 0; disconnectCount=0
         if (stripped.isBlank()) {
          awaitingWakeCommand = true
          status = "Johna · πες την εντολή"
@@ -398,7 +432,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
        }
        else -> {
         // Ordinary background speech is not an engine error. Keep waiting.
-        wakeRetries=0
+        wakeRetries=0; disconnectCount=0
         status="Johna · αναμονή λέξης ενεργοποίησης"
         scheduleWakeRestart(600L)
        }
@@ -455,6 +489,11 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
   val close = listOf("κλεισε", "κρυψε", "πισω", "αρχικη", "επιστροφη", "γυρνα")
   val closeTarget = listOf("παραθυρο", "πανελ", "καμερ", "καιρ", "ρυθμισ", "ειδοποι", "ημερολογ", "συσκευ", "ολα", "οθονη", "πισω", "αρχικη")
   val standaloneClose = q.trim() in listOf("κλεισε", "κλειστο", "πισω", "αρχικη", "αρχικη οθονη", "κλεισε τα ολα", "κλεισε ολα", "γυρνα πισω", "επιστροφη")
+  if (close.any { it in q } && listOf("gmail", "mail", "μειλ", "chrome", "χρωμ", "εφαρμογ").any { it in q }) {
+   voicePanel="close";status="Αρχική JOHNA"
+   aiResponse="Επέστρεψα στον πίνακα JOHNA. Το Android δεν επιτρέπει να τερματίσω μια τρίτη εφαρμογή από εδώ."
+   return true
+  }
   if (close.any { it in q } && "καμερ" in q) {
    aiResponse = "Για να κλείσεις την εξωτερική εφαρμογή Κάμερας χρησιμοποίησε το Πίσω του Android."
    status = "Κάμερα · εξωτερική εφαρμογή"
