@@ -109,7 +109,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
   loadHistory()
   soundEnabled = getSharedPreferences("johna_glass", MODE_PRIVATE).getBoolean("soundEffects", true)
   initSounds()
-  volumeLevel = getVolumeLevel()
+  volumeLevel = readCurrentMediaVolumeLevel()
 
   tts = TextToSpeech(this, this)
   tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
@@ -159,7 +159,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     onNotifications = { status = "Ειδοποιήσεις: η πρόσβαση είναι απενεργοποιημένη" },
     onListen       = { active = true; requestListen() },
     onStop         = { stopConversation() },
-    onContinuous   = { enabled -> setWakeEnabled(enabled) },
+    onContinuous   = { enabled -> configureWakeListening(enabled) },
     onSaveKey      = { saveKey(it) },
     onClearHistory = { clearHistory() },
     onHello        = { active = false; speak("Γεια σου! Είμαι η Τζόνα. Είμαι έτοιμη.") },
@@ -185,7 +185,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
  override fun onStart() {
   super.onStart()
   foreground = true
-  volumeLevel = getVolumeLevel()
+  volumeLevel = readCurrentMediaVolumeLevel()
  }
  override fun onStop() {
   foreground = false
@@ -239,7 +239,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
   try { soundPool?.play(id, level, level, 1, 0, 1f) } catch (_: Exception) {}
  }
 
- private fun getVolumeLevel(): Int {
+ private fun readCurrentMediaVolumeLevel(): Int {
   return try {
    val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
    val max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
@@ -250,14 +250,14 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
  /** 0..10 is a friendly UI scale mapped to the actual Android media stream. */
  private fun executeVolumeCommand(q: String): Boolean {
   val command = LocalVolumeParser.parse(q) ?: return false
-  val previous = getVolumeLevel()
+  val previous = readCurrentMediaVolumeLevel()
   val target = LocalVolumeParser.target(previous, command)
   return try {
    val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
    val max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
    val mapped = kotlin.math.round(target * max / 10f).toInt().coerceIn(0, max)
    am.setStreamVolume(AudioManager.STREAM_MUSIC, mapped, 0)
-   volumeLevel = getVolumeLevel()
+   volumeLevel = readCurrentMediaVolumeLevel()
    playSound(if (target >= previous) "volume_up" else "volume_down")
    status = "Ένταση ${volumeLevel}/10"
    aiResponse = "Ένταση ήχου: ${volumeLevel} από 10"
@@ -278,7 +278,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
 
  /** Experimental foreground-only wake phrase recognition using Android's STT service.
   * This is NOT a low-power, always-on local hotword engine. */
- private fun setWakeEnabled(enabled: Boolean) {
+ private fun configureWakeListening(enabled: Boolean) {
   wakeEnabled = enabled
   continuous = false
   wakeRetries = 0
