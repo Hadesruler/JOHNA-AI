@@ -63,18 +63,28 @@ fun GlassDashboard(
  onVoicePanelConsumed: () -> Unit,
  speaking: Boolean,
  listening: Boolean,
+ micEnergy: Float,
+ volumeLevel: Int,
+ soundEffectsEnabled: Boolean,
+ onSoundEffectsChanged: (Boolean) -> Unit,
+ onPanelTransition: (Boolean) -> Unit,
  continuous: Boolean,
  weather: String,
  weatherDetails: String,
+ weatherForecast: WeatherForecast?,
+ weatherLoading: Boolean,
+ weatherError: String,
  notifications: List<String>,
  devices: List<Pair<String, String>>,
  deviceScan: String,
+ installedApps: List<AppShortcut>,
  keyConfigured: Boolean,
  googleSignedIn: Boolean,
  gmailMessages: List<GmailMessage>,
  calendarEvents: List<CalendarEvent>,
  onWeather: () -> Unit,
  onDiscover: () -> Unit,
+ onLaunchApp: (String) -> Unit,
  onNotifications: () -> Unit,
  onListen: () -> Unit,
  onStop: () -> Unit,
@@ -86,13 +96,26 @@ fun GlassDashboard(
  onOpenMail: () -> Unit,
  onOpenChrome: () -> Unit,
  onOpenCamera: () -> Unit,
+ onOpenSmartHome: () -> Unit,
  onGoogleSignIn: () -> Unit,
  appSha1: String
 ) {
  var focused  by remember { mutableStateOf("") }
  var seconds  by remember { mutableIntStateOf(10) }
  var theme    by remember { mutableIntStateOf(0) }
+ var ambientEnabled by remember { mutableStateOf(true) }
  var settings by remember { mutableStateOf(false) }
+ var lastPanelInteraction by remember { mutableIntStateOf(0) }
+ var selectedDock by remember { mutableIntStateOf(-1) }
+ LaunchedEffect(selectedDock) { if (selectedDock >= 0) { delay(260); selectedDock = -1 } }
+ var priorPanelVisible by remember { mutableStateOf(false) }
+ var panelTransitionInitialized by remember { mutableStateOf(false) }
+ LaunchedEffect(focused, settings) {
+  val visibleNow = focused.isNotEmpty() || settings
+  if (panelTransitionInitialized && visibleNow != priorPanelVisible) onPanelTransition(visibleNow)
+  priorPanelVisible = visibleNow
+  panelTransitionInitialized = true
+ }
 
  LaunchedEffect(voicePanel) {
   if (voicePanel.isNotBlank()) {
@@ -110,7 +133,7 @@ fun GlassDashboard(
  LaunchedEffect(Unit) { while (true) { now = System.currentTimeMillis(); delay(1000) } }
 
  // Auto-close panel after [seconds] of inactivity (0 = disabled)
- LaunchedEffect(focused, seconds) {
+ LaunchedEffect(focused, seconds, lastPanelInteraction) {
   if (focused.isNotEmpty() && seconds > 0) { delay(seconds * 1000L); focused = "" }
  }
 
@@ -119,7 +142,10 @@ fun GlassDashboard(
 
  val context = androidx.compose.ui.platform.LocalContext.current
  val prefs   = remember { context.getSharedPreferences("johna_glass", 0) }
- LaunchedEffect(Unit) { theme = prefs.getInt("theme", 0).coerceIn(0, 3) }
+ LaunchedEffect(Unit) {
+  theme = prefs.getInt("theme", 0).coerceIn(0, 3)
+  ambientEnabled = prefs.getBoolean("ambientEnabled", true)
+ }
 
  val time = remember(now) { SimpleDateFormat("HH:mm", Locale("el", "GR")).format(Date(now)) }
  val date = remember(now) { SimpleDateFormat("EEE, d MMM yyyy", Locale("el", "GR")).format(Date(now)) }
@@ -129,6 +155,9 @@ fun GlassDashboard(
 
  Box(Modifier.fillMaxSize().background(Color(0xFF10172C))) {
   Image(painterResource(R.drawable.johna_landscape_bg), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+  if (ambientEnabled) {
+   AmbientLivingBackdrop(accent = accent, speaking = speaking, listening = listening, modifier = Modifier.fillMaxSize())
+  }
   Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0x5512213A), Color(0x33060D25), Color(0x99040B1E)))))
 
   Column(Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 10.dp)) {
@@ -138,7 +167,7 @@ fun GlassDashboard(
     Column { Text(time, color = white, fontSize = 30.sp, fontWeight = FontWeight.Light); Text(date, color = white, fontSize = 11.sp) }
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
      Text("✧  J O H N A   A I  ✧", color = white, fontSize = 25.sp, fontWeight = FontWeight.Light)
-     Text("GLASS COMMAND CENTER · v1.0.9", color = accent, fontSize = 9.sp)
+     Text("LIVING COMMAND CENTER · v1.0.14", color = accent, fontSize = 9.sp)
     }
     Text("◈  THEMES", color = accent, modifier = Modifier.clickable { theme = (theme + 1) % 4; prefs.edit().putInt("theme", theme).apply() }.padding(10.dp))
    }
@@ -151,7 +180,9 @@ fun GlassDashboard(
     // Left column
     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp)) {
      GlassBox("☁  Καιρός · Αθήνα", Modifier.weight(1f), onExpand = { focused = "weather" }) {
-      Text(if (weather.contains("°")) "☀  $weather" else "☁  $weather", color = white, fontSize = 33.sp, fontWeight = FontWeight.Light)
+      val today = weatherForecast?.days?.firstOrNull()
+      val isNight = today != null && (weatherForecast!!.updated < today.sunrise || weatherForecast!!.updated >= today.sunset)
+      Text(if (weather.contains("°")) "${if (isNight) "☾" else "☀"}  $weather" else "☁  $weather", color = white, fontSize = 33.sp, fontWeight = FontWeight.Light)
       Text(weatherDetails, color = white.copy(alpha = .85f), fontSize = 11.sp, maxLines = 2)
       Spacer(Modifier.weight(1f)); Text("☀       ☁       🌧       ⛈", color = accent, fontSize = 20.sp)
       Text("Πρόγνωση καιρού", color = white.copy(alpha = .75f), fontSize = 11.sp)
@@ -171,6 +202,7 @@ fun GlassDashboard(
      JohnaSphere(
       speaking = speaking,
       listening = listening,
+      voiceEnergy = micEnergy,
       modifier = Modifier
        .fillMaxWidth(.78f)
        .aspectRatio(1f)
@@ -178,6 +210,16 @@ fun GlassDashboard(
        .clickable { onListen() }
      )
      Text(status, color = white, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+     AnimatedContent(targetState = volumeLevel, label = "mediaLevel") { level ->
+      Row(verticalAlignment = Alignment.CenterVertically) {
+       Text("MEDIA  ", color = accent, fontSize = 10.sp)
+       repeat(10) { n ->
+        Box(Modifier.padding(horizontal = 1.dp).width(7.dp).height(5.dp)
+         .background(if (n < level) aqua else Color(0x447B8BA3), RoundedCornerShape(2.dp)))
+       }
+       Text("  $level/10", color = white.copy(alpha = .8f), fontSize = 10.sp)
+      }
+     }
      Text(
       aiResponse,
       color = aqua, fontSize = 12.sp, textAlign = TextAlign.Center,
@@ -188,9 +230,12 @@ fun GlassDashboard(
       Button(onClick = onListen, colors = ButtonDefaults.buttonColors(containerColor = Color(0xBB7555C6))) {
        Text(if (listening) "🎙  Ακούω..." else "🎙  Μίλα στη Johna")
       }
+      OutlinedButton(onClick = { onContinuous(!continuous) }) {
+       Text(if (continuous) "Wake ON" else "Wake: Johna", color = if (continuous) aqua else white)
+      }
       OutlinedButton(onClick = onStop) { Text("Στοπ", color = white) }
      }
-     Text("Πάτησε Μίλα · μία εντολή κάθε φορά", color = white.copy(alpha = .8f), fontSize = 11.sp)
+     Text("Wake: Johna (πειραματικό, μόνο με την εφαρμογή ανοιχτή)", color = white.copy(alpha = .8f), fontSize = 11.sp)
     }
 
     // Right column
@@ -202,6 +247,7 @@ fun GlassDashboard(
      GlassBox("⌂  Smart Home", Modifier.weight(.9f), onExpand = { focused = "devices" }) {
       Text("${devices.size} υπηρεσίες δικτύου", color = white, fontSize = 14.sp)
       Text(deviceScan, color = white.copy(alpha = .8f), fontSize = 11.sp, maxLines = 2)
+      Text("Άνοιγμα Google Home / Home Assistant", color = accent, fontSize = 11.sp, modifier = Modifier.clickable { onOpenSmartHome() })
       Spacer(Modifier.height(7.dp)); Text("◉  Αναζήτηση συσκευών", color = accent, fontSize = 12.sp, modifier = Modifier.clickable { onDiscover() })
      }
     }
@@ -213,14 +259,17 @@ fun GlassDashboard(
    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
     listOf(
      "◉" to "Συνομιλία", "☀" to "Καιρός", "▦" to "Ημερολόγιο",
-     "✉" to "Gmail", "◉" to "Chrome", "◉" to "Κάμερα", "⚙" to "Ρυθμίσεις"
+     "✉" to "Gmail", "◉" to "Chrome", "◉" to "Κάμερα", "▦" to "Εφαρμογές", "⚙" to "Ρυθμίσεις"
     ).forEachIndexed { index, item ->
+     val hoverScale by animateFloatAsState(if (selectedDock == index) 1.085f else 1f, label = "dockTouch$index")
      Column(
       Modifier.weight(1f).height(82.dp)
+       .graphicsLayer { scaleX = hoverScale; scaleY = hoverScale }
        .shadow(12.dp, RoundedCornerShape(20.dp))
        .border(1.dp, accent.copy(alpha = .7f), RoundedCornerShape(20.dp))
        .background(Color(0x88546696), RoundedCornerShape(20.dp))
        .clickable {
+        selectedDock = index
         when (index) {
          0 -> onListen()
          1 -> focused = "weather"
@@ -228,6 +277,7 @@ fun GlassDashboard(
          3 -> focused = "mail"
          4 -> onOpenChrome()
          5 -> onOpenCamera()
+         6 -> focused = "apps"
          else -> settings = true
         }
        }
@@ -251,8 +301,8 @@ fun GlassDashboard(
   AnimatedContent(
    targetState = focused,
    transitionSpec = {
-    val fromLeft = targetState in listOf("weather", "calendar", "mail")
-    val toLeft   = initialState in listOf("weather", "calendar", "mail")
+    val fromLeft = targetState in listOf("weather", "calendar", "mail", "apps")
+    val toLeft   = initialState in listOf("weather", "calendar", "mail", "apps")
     (slideInHorizontally(initialOffsetX = { w -> if (fromLeft) -w else w }, animationSpec = tween(390, easing = FastOutSlowInEasing))
      + fadeIn(tween(210))) togetherWith
      (slideOutHorizontally(targetOffsetX = { w -> if (toLeft) -w else w }, animationSpec = tween(310, easing = FastOutSlowInEasing))
@@ -268,19 +318,17 @@ fun GlassDashboard(
        "calendar"      -> "▦  Ημερολόγιο Google"
        "mail"          -> "✉  Gmail · johnyexoperience@gmail.com"
        "notifications" -> "♧  Ειδοποιήσεις"
+       "apps"          -> "▦  Εγκατεστημένες εφαρμογές"
        else            -> "⌂  Έξυπνες συσκευές"
       },
-      Modifier.fillMaxWidth(.76f).fillMaxHeight(.88f),
+      Modifier.fillMaxWidth(if (panel == "weather") .94f else .76f)
+       .fillMaxHeight(if (panel == "weather") .95f else .88f),
       onExpand = { focused = "" }
      ) {
       Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
        when (panel) {
         "weather" -> {
-         Text(weather, color = white, fontSize = 54.sp)
-         Text(weatherDetails, color = white)
-         Spacer(Modifier.height(12.dp))
-         Text("☀    ☁    🌧    ⛈", fontSize = 36.sp)
-         TextButton(onClick = onWeather) { Text("↻ Ανανέωση", color = aqua) }
+         WeatherDetailPanel(weatherForecast,weatherLoading,weatherError,onRefresh=onWeather,onActivity={lastPanelInteraction++})
         }
 
         "calendar" -> {
@@ -345,6 +393,18 @@ fun GlassDashboard(
          }
         }
 
+        "apps" -> {
+         var appFilter by remember { mutableStateOf("") }
+         Text("ΕΦΑΡΜΟΓΕΣ ANDROID",color=aqua,fontSize=12.sp)
+         Text("Ανοίγουν μέσα από τον ασφαλή Android launcher. Κάθε εφαρμογή διατηρεί το δικό της περιβάλλον και δικαιώματα.",color=white.copy(alpha=.75f),fontSize=11.sp)
+         OutlinedTextField(value=appFilter,onValueChange={appFilter=it;lastPanelInteraction++},label={Text("Αναζήτηση εφαρμογής")},singleLine=true,modifier=Modifier.fillMaxWidth())
+         installedApps.filter { it.title.contains(appFilter,ignoreCase=true) }.take(45).forEach { app ->
+          TextButton(onClick={lastPanelInteraction++;onLaunchApp(app.packageName)}) {
+           Text("◉  ${app.title}",color=white,fontSize=14.sp)
+          }
+         }
+        }
+
         "notifications" -> {
          if (notifications.isEmpty()) Text("Δεν υπάρχουν διαθέσιμες ειδοποιήσεις.", color = white)
          else notifications.forEach { Text("• $it", color = white); Spacer(Modifier.height(4.dp)) }
@@ -352,9 +412,21 @@ fun GlassDashboard(
         }
 
         else -> { // devices
+         Text("ΣΥΝΔΕΔΕΜΕΝΟ ΣΠΙΤΙ · DISCOVERY",color=aqua,fontSize=12.sp,letterSpacing=1.sp)
          Text(deviceScan, color = white)
-         devices.forEach { Text("• ${it.first} · ${it.second}", color = white, fontSize = 12.sp) }
-         TextButton(onClick = onDiscover) { Text("↻ Αναζήτηση Wi-Fi", color = aqua) }
+         Text("Εντοπισμός ≠ εξουσιοδοτημένος έλεγχος. Για έλεγχο χρειάζεται σύνδεση του αντίστοιχου controller.",color=white.copy(alpha=.72f),fontSize=11.sp)
+         Row(horizontalArrangement=Arrangement.spacedBy(10.dp)) {
+          Button(onClick={lastPanelInteraction++;onDiscover()}) { Text("↻ Σάρωση δικτύου") }
+          OutlinedButton(onClick={lastPanelInteraction++;onOpenSmartHome()}) { Text("Άνοιγμα Controller") }
+         }
+         devices.forEach { device ->
+          Column(Modifier.fillMaxWidth().padding(vertical=5.dp).background(Color(0x2237A6FF),RoundedCornerShape(12.dp)).padding(12.dp)) {
+           Text("◉ ${device.first}",color=white,fontSize=14.sp)
+           Text(device.second,color=aqua,fontSize=10.sp)
+           Text("Ανακαλύφθηκε στο LAN · απαιτείται συμβατό API για χειρισμό",color=white.copy(alpha=.7f),fontSize=10.sp)
+          }
+         }
+         if(devices.isEmpty()) Text("Δεν έχουν εντοπιστεί τοπικές συσκευές ακόμα.",color=white.copy(alpha=.8f))
         }
        }
       }
@@ -378,10 +450,24 @@ fun GlassDashboard(
 
   // ── Settings dialog ──────────────────────────────────────────────────────
   if (settings) AlertDialog(
+   containerColor = Color(0xFF17233D),
+   titleContentColor = white,
+   textContentColor = white,
    onDismissRequest = { settings = false },
    title = { Text("Ρυθμίσεις JOHNA AI") },
    text = {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+     Row(verticalAlignment = Alignment.CenterVertically) {
+      Text("Ζωντανό φόντο", modifier = Modifier.weight(1f), color = white)
+      Switch(checked = ambientEnabled, onCheckedChange = {
+       ambientEnabled = it
+       prefs.edit().putBoolean("ambientEnabled", it).apply()
+      })
+     }
+     Row(verticalAlignment = Alignment.CenterVertically) {
+      Text("Ηχητικά εφέ JOHNA", modifier = Modifier.weight(1f), color = white)
+      Switch(checked = soundEffectsEnabled, onCheckedChange = onSoundEffectsChanged)
+     }
      Text(if (keyConfigured) "✅ Groq API key αποθηκευμένο" else "⚠ Δεν υπάρχει Groq API key")
      OutlinedTextField(keyDraft, { keyDraft = it }, label = { Text("Νέο Groq API key") }, singleLine = true)
      TextButton(onClick = { if (keyDraft.isNotBlank()) onSaveKey(keyDraft.trim()); keyDraft = "" }) { Text("Αποθήκευση κρυπτογραφημένα") }

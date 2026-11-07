@@ -1,150 +1,135 @@
 package com.johna.assistant
 
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.layout.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.drawscope.clipPath
-import kotlinx.coroutines.delay
 import kotlin.math.*
 
 /**
- * Genuine 3D sphere using orthographic projection of lat/lon surface grid.
- * - Rotates slowly around Y-axis while speaking.
- * - Pulses a teal glow ring while listening.
- * - Soft specular highlight and rim light always visible.
+ * JOHNA Energy Core: luminous volumetric-looking center and separate hollow
+ * perspective rings. No latitude/longitude or globe mesh.
+ * Animation is UI-only; wake detection and audio processing live elsewhere.
  */
 @Composable
 fun JohnaSphere(
  speaking: Boolean,
  listening: Boolean = false,
- modifier: Modifier = Modifier
+ modifier: Modifier = Modifier,
+ voiceEnergy: Float = 0f
 ) {
- var turn by remember { mutableFloatStateOf(0f) }
- var glowPhase by remember { mutableFloatStateOf(0f) }
-
- LaunchedEffect(speaking) {
-  while (speaking) { delay(32); turn = (turn + 0.27f) % 360f }
- }
- LaunchedEffect(listening) {
-  var t = 0f
-  while (listening) { delay(20); t += 0.07f; glowPhase = sin(t).toFloat() }
-  glowPhase = 0f
- }
-
+ val motion = rememberInfiniteTransition(label = "johnaEnergy")
+ val orbit by motion.animateFloat(
+  initialValue = 0f, targetValue = 360f,
+  animationSpec = infiniteRepeatable(tween(28000, easing = LinearEasing)),
+  label = "orbit"
+ )
+ val breathe by motion.animateFloat(
+  initialValue = 0f, targetValue = 1f,
+  animationSpec = infiniteRepeatable(tween(1900, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+  label = "coreBreath"
+ )
+ val shimmer by motion.animateFloat(
+  initialValue = 0f, targetValue = 1f,
+  animationSpec = infiniteRepeatable(tween(700, easing = LinearEasing), RepeatMode.Reverse),
+  label = "speakingShimmer"
+ )
  Canvas(modifier) {
-  val radius = min(size.width, size.height) * .405f
-  val c = Offset(size.width / 2f, size.height / 2f)
+  val c = Offset(size.width * .5f, size.height * .5f)
+  val radius = size.minDimension * .295f
+  val energy = when {
+   speaking -> .52f + shimmer * .38f
+   listening -> (.20f + voiceEnergy.coerceIn(0f, 1f) * .8f)
+   else -> .16f + breathe * .11f
+  }
+  val mainBlue = Color(0xFF61E6FF)
+  val lilac = Color(0xFFB39CFF)
+  val phase = orbit * PI.toFloat() / 180f
 
-  // ── Listening outer pulse ring ──────────────────────────────────────────
-  if (listening) {
-   val ringR = radius * (1.4f + .22f * glowPhase)
-   drawCircle(
-    Brush.radialGradient(
-     listOf(Color(0x5500EFCC), Color(0x1500C8AA), Color.Transparent),
-     center = c, radius = ringR * 1.15f
+  // Ambient field remains transparent outside the orb; dashboard stays readable.
+  drawCircle(Brush.radialGradient(
+   listOf(Color(0x66269EFF).copy(alpha = .12f + energy * .19f), Color(0x224759BF), Color.Transparent),
+   center = c, radius = radius * 2.2f
+  ), radius = radius * 2.2f, center = c)
+
+  fun ringPoint(t: Float, major: Float, squish: Float, rotation: Float): Offset {
+   val x = major * cos(t)
+   val y = major * squish * sin(t)
+   val cr = cos(rotation)
+   val sr = sin(rotation)
+   return Offset(c.x + x * cr - y * sr, c.y + x * sr + y * cr)
+  }
+
+  fun ring(major: Float, squish: Float, rotation: Float, front: Boolean, ringColor: Color) {
+   val path = Path()
+   var drawing = false
+   for (i in 0..180) {
+    val a = (i.toFloat() / 180f) * (2f * PI.toFloat())
+    val isFront = sin(a) >= 0f
+    if (isFront == front) {
+     val p = ringPoint(a, major, squish, rotation)
+     if (!drawing) path.moveTo(p.x, p.y) else path.lineTo(p.x, p.y)
+     drawing = true
+    } else drawing = false
+   }
+   drawPath(path, ringColor.copy(alpha = if (front) .17f else .08f), style = Stroke(width = radius * .085f))
+   drawPath(path, ringColor.copy(alpha = if (front) .90f else .31f), style = Stroke(width = if (front) 2.7f else 1.3f))
+  }
+
+  // Back halves go behind the inner energy core, not across its surface.
+  val tilt = .18f * sin(phase * .27f)
+  ring(radius * 1.39f, .41f, -.38f + tilt, false, mainBlue)
+  ring(radius * 1.15f, .66f, .91f - tilt, false, lilac)
+
+  // Several soft transparent layers make a luminous ball, rather than a grid globe.
+  drawCircle(
+   Brush.radialGradient(
+    listOf(
+     Color(0xFFE5FDFF), Color(0xFFAAEFFF), Color(0xFF287DD6),
+     Color(0xFF122A75), Color(0xFF080F37), Color(0xFF051029)
     ),
-    radius = ringR, center = c
-   )
-   drawCircle(
-    color = Color(0xAA00FFCC),
-    radius = ringR, center = c,
-    style = Stroke(width = 3.5f + 2f * glowPhase)
-   )
-   // second inner ring for depth
-   drawCircle(
-    color = Color(0x6600CCAA),
-    radius = radius * (1.12f + .1f * glowPhase), center = c,
-    style = Stroke(width = 2f)
-   )
-  }
-
-  // ── Main sphere body — radial gradient simulating directional light ──────
+    center = Offset(c.x - radius * .23f, c.y - radius * .29f),
+    radius = radius * 1.6f
+   ), radius = radius, center = c
+  )
   drawCircle(
    Brush.radialGradient(
-    listOf(Color(0xFF90F9FF), Color(0xFF3B66B9), Color(0xFF10234E), Color(0xFF040A22)),
-    center = Offset(c.x - radius * .48f, c.y - radius * .45f),
-    radius = radius * 2.05f
-   ),
-   radius = radius, center = c
+    listOf(Color(0xCC73F8FF).copy(alpha = .32f + .38f * energy), Color(0x885AB8FF), Color.Transparent),
+    center = c, radius = radius * .8f
+   ), radius = radius * .76f, center = c
   )
+  drawCircle(Color(0xBB82F4FF), radius = radius, center = c,
+   style = Stroke(width = 1.7f + energy * 2f))
 
-  // ── Surface lat/lon grid (orthographic projection) ───────────────────────
-  val edge = Path().apply {
-   addOval(
-    androidx.compose.ui.geometry.Rect(
-     c.x - radius, c.y - radius, c.x + radius, c.y + radius
-    )
-   )
-  }
-  clipPath(edge) {
-   val a = turn.toDouble() * PI / 180.0
-   val lineColor = Color(0xFFB6FAFF).copy(alpha = .57f)
+  // Two separate foreground orbital paths create a hollow 3D frame.
+  ring(radius * 1.39f, .41f, -.38f + tilt, true, mainBlue)
+  ring(radius * 1.15f, .66f, .91f - tilt, true, lilac)
 
-   fun project(latitude: Double, longitude: Double): Pair<Offset, Boolean> {
-    val lat = latitude * PI / 180.0
-    val lon = longitude * PI / 180.0 + a
-    val x = cos(lat) * sin(lon)
-    val y = sin(lat)
-    val z = cos(lat) * cos(lon)
-    return Offset(c.x + (radius * x).toFloat(), c.y - (radius * y).toFloat()) to (z >= 0)
-   }
-
-   fun curve(points: List<Pair<Offset, Boolean>>) {
-    var prev: Offset? = null
-    for ((pt, visible) in points) {
-     if (visible && prev != null) drawLine(lineColor, prev, pt, 1.7f)
-     prev = if (visible) pt else null
-    }
-   }
-
-   for (longitude in 0 until 360 step 20) {
-    curve((-90..90 step 3).map { project(it.toDouble(), longitude.toDouble()) })
-   }
-   for (latitude in -75..75 step 15) {
-    curve((0..360 step 3).map { project(latitude.toDouble(), it.toDouble()) })
-   }
+  // Bright nodes slowly travel along the outer orbit, emphasizing rotation.
+  for (i in 0..2) {
+   val a = phase + i * 2.094f
+   val pt = ringPoint(a, radius * 1.39f, .41f, -.38f + tilt)
+   drawCircle(Color(0x442FFAFF), radius * .085f, center = pt)
+   drawCircle(Color(0xFFE9FEFF), radius * .019f, center = pt)
   }
 
-  // ── Rim light (always on) ────────────────────────────────────────────────
-  drawCircle(
-   color = Color(0xFFA1DFFF).copy(alpha = .7f),
-   radius = radius, center = c,
-   style = Stroke(width = 2.5f)
-  )
-
-  // ── Outer soft ambient glow ──────────────────────────────────────────────
-  drawCircle(
-   Brush.radialGradient(
-    listOf(Color(0x44A3F2FF), Color.Transparent),
-    center = c, radius = radius * 1.25f
-   ),
-   radius = radius * 1.15f, center = c
-  )
-
-  // ── Speaking: inner warm fill ────────────────────────────────────────────
-  if (speaking) {
-   drawCircle(
-    Brush.radialGradient(
-     listOf(Color(0x556060FF), Color(0x22A0DFFF), Color.Transparent),
-     center = c, radius = radius * .8f
-    ),
-    radius = radius * .75f, center = c
-   )
+  // Speech / microphone energy pulses around the core.
+  if (speaking || listening) {
+   for (i in 0..2) {
+    val wave = (breathe + i * .33f) % 1f
+    drawCircle(mainBlue.copy(alpha = (1f - wave) * (.12f + energy * .22f)),
+     radius = radius * (1.1f + wave * .51f), center = c,
+     style = Stroke(width = 1.5f + (1f - wave) * 1.7f))
+   }
   }
-
-  // ── Specular highlight (top-left bright spot) ────────────────────────────
   drawCircle(
-   Brush.radialGradient(
-    listOf(Color(0xCCFFFFFF), Color(0x44C8FFFF), Color.Transparent),
-    center = Offset(c.x - radius * .32f, c.y - radius * .34f),
-    radius = radius * .38f
-   ),
-   radius = radius * .34f,
-   center = Offset(c.x - radius * .32f, c.y - radius * .34f)
+   Brush.radialGradient(listOf(Color.White.copy(alpha = .48f), Color(0x5582ECFF), Color.Transparent),
+    center = Offset(c.x - radius * .31f, c.y - radius * .34f), radius = radius * .43f),
+   radius = radius * .43f,
+   center = Offset(c.x - radius * .31f, c.y - radius * .34f)
   )
  }
 }
