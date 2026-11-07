@@ -60,6 +60,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
  private var wakeEnabled by mutableStateOf(false)
  private var awaitingWakeCommand = false
  private var wakeRetries = 0
+ private var wakeRestart: Runnable? = null
  private var foreground = true
  private var errors       = 0
  private var ttsReady     = false
@@ -115,7 +116,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
   tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
    override fun onStart(id: String?)  { main.post { speaking = true } }
    override fun onDone(id: String?)   { main.post { speaking = false; onTtsDone() } }
-   override fun onError(id: String?)  { main.post { speaking = false } }
+   override fun onError(id: String?)  { main.post { speaking = false; onTtsDone() } }
   })
   refreshWeather()
   refreshApps()
@@ -186,14 +187,22 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
   super.onStart()
   foreground = true
   volumeLevel = readCurrentMediaVolumeLevel()
+  // Resume foreground listening after a temporary loss of focus, if user enabled it.
+  if (wakeEnabled) scheduleWakeRestart(900L)
  }
  override fun onStop() {
   foreground = false
-  if (wakeEnabled) { wakeEnabled = false; active = false; listening = false; recognizer?.cancel(); status = "Wake mode σταμάτησε εκτός εφαρμογής" }
+  cancelWakeRestart()
+  if (wakeEnabled) {
+   active=false; listening=false
+   recognizer?.cancel(); recognizer?.destroy(); recognizer=null
+   status="Wake mode σε παύση εκτός JOHNA"
+  }
   super.onStop()
  }
 
  override fun onDestroy() {
+  cancelWakeRestart()
   val nsd = getSystemService(NSD_SERVICE) as NsdManager
   discoveries.forEach { try { nsd.stopServiceDiscovery(it) } catch (_: Exception) {} }
   active = false; recognizer?.destroy(); tts?.stop(); tts?.shutdown()
@@ -278,7 +287,27 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
 
  /** Experimental foreground-only wake phrase recognition using Android's STT service.
   * This is NOT a low-power, always-on local hotword engine. */
+ private fun cancelWakeRestart() {
+  wakeRestart?.let { main.removeCallbacks(it) }
+  wakeRestart = null
+ }
+
+ private fun scheduleWakeRestart(delayMillis: Long) {
+  cancelWakeRestart()
+  if (!wakeEnabled || !foreground || isFinishing || isDestroyed) return
+  val task=Runnable {
+   wakeRestart=null
+   if (wakeEnabled && foreground && !speaking && !aiPending && !listening) {
+    active=true
+    beginListening()
+   }
+  }
+  wakeRestart=task
+  main.postDelayed(task, delayMillis)
+ }
+
  private fun configureWakeListening(enabled: Boolean) {
+  cancelWakeRestart()
   wakeEnabled = enabled
   continuous = false
   wakeRetries = 0
@@ -294,15 +323,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
   }
  }
 
- private fun removeWakePrefix(input: String): String? {
-  val cleaned = norm(input).trim().replace(Regex("[,.!?]+"), " ").trim()
-  val prefixes = listOf("johna", "τζονα", "τζωνα", "τζοννα", "τζωνa", "τσονα")
-  for (w in prefixes) {
-   if (cleaned == w) return ""
-   if (cleaned.startsWith("$w ")) return cleaned.removePrefix(w).trim()
-  }
-  return null
- }
+ private fun removeWakePrefix(input: String): String? = WakePhraseParser.strip(input)
 
  private fun requestListen() {
   if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) beginListening()
@@ -314,6 +335,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
   if (!SpeechRecognizer.isRecognitionAvailable(this)) {
    status = "Δεν υπάρχει υπηρεσία αναγνώρισης"; active = false; return
   }
+  cancelWakeRestart()
   recognizer?.destroy(); recognizer = null
   listening = true
   micEnergy = 0f
@@ -328,16 +350,28 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     override fun onPartialResults(partial: Bundle?) {}
 
     override fun onError(error: Int) {
-     listening = false
-     micEnergy = 0f
-     // Only expected silence errors may retry. Abort on permissions/network/busy errors.
-     if (wakeEnabled && foreground && (error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT) && wakeRetries < 5) {
+     listening=false
+     micEnergy=0f
+     val recoverable = error == SpeechRecognizer.ERROR_NO_MATCH ||
+       error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT ||
+       error == SpeechRecognizer.ERROR_SERVER_DISCONNECTED ||
+       error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY ||
+       error == SpeechRecognizer.ERROR_NETWORK ||
+       error == SpeechRecognizer.ERROR_NETWORK_TIMEOUT
+     if (wakeEnabled && foreground && recoverable) {
       wakeRetries++
-      status = "Johna · αναμονή λέξης ενεργοποίησης"
-      main.postDelayed({ active = true; beginListening() }, 1100L)
+      if (wakeRetries <= 4) {
+       val waitMs = when (wakeRetries) {1->1500L;2->3000L;3->5500L;else->8500L}
+       status= if(error==SpeechRecognizer.ERROR_SERVER_DISCONNECTED)
+        "Wake · επανασύνδεση φωνής (11)" else "Wake · επαναπροσπάθεια ($error)"
+       scheduleWakeRestart(waitMs)
+      } else {
+       wakeEnabled=false;active=false;awaitingWakeCommand=false
+       status="Η αναγνώριση σταμάτησε ($error). Έλεγξε την υπηρεσία φωνής και πάτα Wake."
+      }
      } else {
-      active = false; wakeEnabled = false; awaitingWakeCommand = false
-      status = "Ακρόαση σταμάτησε ($error) · πάτησε Wake για επανεκκίνηση"
+      active=false;wakeEnabled=false;awaitingWakeCommand=false
+      status="Ακρόαση σταμάτησε ($error)"
      }
     }
 
@@ -357,16 +391,16 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         if (stripped.isBlank()) {
          awaitingWakeCommand = true
          status = "Johna · πες την εντολή"
-         main.postDelayed({ active = true; beginListening() }, 350L)
+         scheduleWakeRestart(420L)
         } else {
          active = false; askGroq(stripped)
         }
        }
        else -> {
-        if (++wakeRetries > 5) {
-         wakeEnabled = false; active = false
-         status = "Wake mode σε παύση · πάτησε Wake"
-        } else main.postDelayed({ active = true; beginListening() }, 1100L)
+        // Ordinary background speech is not an engine error. Keep waiting.
+        wakeRetries=0
+        status="Johna · αναμονή λέξης ενεργοποίησης"
+        scheduleWakeRestart(600L)
        }
       }
      } else {
@@ -389,6 +423,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
  }
 
  private fun stopConversation() {
+  cancelWakeRestart()
   requestGeneration++; aiPending = false
   active = false; continuous = false; listening = false; wakeEnabled = false; awaitingWakeCommand = false
   recognizer?.cancel(); recognizer?.destroy(); recognizer = null
@@ -397,7 +432,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
  }
 
  private fun onTtsDone() {
-  if (wakeEnabled && foreground && !aiPending) main.postDelayed({ active = true; beginListening() }, 900)
+  if (wakeEnabled && foreground && !aiPending) scheduleWakeRestart(850L)
   else if (status == "Μιλάω") status = "Έτοιμη"
  }
 
@@ -547,7 +582,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
   if (handleVoiceCommand(words)) {
    // Non-speaking local commands also return to foreground wake listening.
    if (wakeEnabled && foreground && !speaking && !aiPending) {
-    main.postDelayed({ if (wakeEnabled && !listening && !speaking) { active = true; beginListening() } }, 750)
+    scheduleWakeRestart(750L)
    }
    return
   }

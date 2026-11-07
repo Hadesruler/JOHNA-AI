@@ -37,15 +37,15 @@ private fun GlassBox(
 ) {
  Column(
   modifier
-   .shadow(18.dp, RoundedCornerShape(24.dp), ambientColor = Color.Black, spotColor = Color.Black)
-   .border(1.dp, Brush.linearGradient(listOf(Color.White.copy(alpha = .65f), lavender.copy(alpha = .35f), aqua.copy(alpha = .55f))), RoundedCornerShape(24.dp))
-   .background(Color(0x77425483), RoundedCornerShape(24.dp))
+   .shadow(10.dp, RoundedCornerShape(24.dp), ambientColor = Color.Black, spotColor = Color.Black)
+   .border(1.dp, Brush.linearGradient(listOf(Color.White.copy(alpha = .22f), lavender.copy(alpha = .14f), aqua.copy(alpha = .22f))), RoundedCornerShape(24.dp))
+   .background(Brush.verticalGradient(listOf(Color(0x77223454), Color(0x9B101D39))), RoundedCornerShape(24.dp))
    .clickable { onExpand() }
    .padding(15.dp)
  ) {
   Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-   Text(title, color = white, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
-   Text("⤢", color = aqua, fontSize = 18.sp)
+   Text(title, color = white, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+   Text("↗", color = aqua.copy(alpha = .75f), fontSize = 16.sp)
   }
   Spacer(Modifier.height(10.dp))
   content()
@@ -153,12 +153,11 @@ fun GlassDashboard(
  val infinite = rememberInfiniteTransition(label = "orb")
  val pulse    by infinite.animateFloat(.97f, 1.025f, infiniteRepeatable(tween(2500), RepeatMode.Reverse), label = "pulse")
 
- Box(Modifier.fillMaxSize().background(Color(0xFF10172C))) {
-  Image(painterResource(R.drawable.johna_landscape_bg), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+ Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0xFF08101F),Color(0xFF0B1630),Color(0xFF040912))))) {
   if (ambientEnabled) {
    AmbientLivingBackdrop(accent = accent, speaking = speaking, listening = listening, modifier = Modifier.fillMaxSize())
   }
-  Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0x5512213A), Color(0x33060D25), Color(0x99040B1E)))))
+  Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0x140A1C33), Color(0x04060D25), Color(0x66040B1E)))))
 
   Column(Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 10.dp)) {
 
@@ -166,10 +165,13 @@ fun GlassDashboard(
    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
     Column { Text(time, color = white, fontSize = 30.sp, fontWeight = FontWeight.Light); Text(date, color = white, fontSize = 11.sp) }
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-     Text("✧  J O H N A   A I  ✧", color = white, fontSize = 25.sp, fontWeight = FontWeight.Light)
-     Text("LIVING COMMAND CENTER · v1.0.14", color = accent, fontSize = 9.sp)
+     Text("J O H N A", color = white, fontSize = 26.sp, fontWeight = FontWeight.Light, letterSpacing = 3.sp)
+     Text("ETHEREAL ASSISTANT · v1.0.15", color = accent.copy(alpha = .8f), fontSize = 10.sp)
     }
-    Text("◈  THEMES", color = accent, modifier = Modifier.clickable { theme = (theme + 1) % 4; prefs.edit().putInt("theme", theme).apply() }.padding(10.dp))
+    Row(verticalAlignment = Alignment.CenterVertically) {
+     Text("◈", color = accent, modifier = Modifier.clickable { theme = (theme + 1) % 4; prefs.edit().putInt("theme", theme).apply() }.padding(9.dp), fontSize=20.sp)
+     Text("⚙", color = white, modifier = Modifier.clickable { settings = true }.padding(9.dp), fontSize=19.sp)
+    }
    }
 
    Spacer(Modifier.height(12.dp))
@@ -204,7 +206,7 @@ fun GlassDashboard(
       listening = listening,
       voiceEnergy = micEnergy,
       modifier = Modifier
-       .fillMaxWidth(.78f)
+       .fillMaxWidth(.90f)
        .aspectRatio(1f)
        .graphicsLayer { scaleX = pulse; scaleY = pulse }
        .clickable { onListen() }
@@ -235,7 +237,7 @@ fun GlassDashboard(
       }
       OutlinedButton(onClick = onStop) { Text("Στοπ", color = white) }
      }
-     Text("Wake: Johna (πειραματικό, μόνο με την εφαρμογή ανοιχτή)", color = white.copy(alpha = .8f), fontSize = 11.sp)
+     Text("Hey Johna · foreground wake (πειραματικό)", color = white.copy(alpha = .58f), fontSize = 10.sp)
     }
 
     // Right column
@@ -255,38 +257,43 @@ fun GlassDashboard(
 
    Spacer(Modifier.height(14.dp))
 
-   // ── Bottom dock ──────────────────────────────────────────────────────────
-   Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+   // ── Floating minimal dock: replaces the oversized rectangular tiles ──
+   Row(
+    Modifier.align(Alignment.CenterHorizontally)
+     .fillMaxWidth(.83f)
+     .height(62.dp)
+     .shadow(18.dp, RoundedCornerShape(38.dp))
+     .border(1.dp, accent.copy(alpha=.24f), RoundedCornerShape(38.dp))
+     .background(Color(0xD2111D34), RoundedCornerShape(38.dp))
+     .padding(horizontal=12.dp, vertical=5.dp),
+    horizontalArrangement = Arrangement.spacedBy(2.dp),
+    verticalAlignment = Alignment.CenterVertically
+   ) {
     listOf(
-     "◉" to "Συνομιλία", "☀" to "Καιρός", "▦" to "Ημερολόγιο",
-     "✉" to "Gmail", "◉" to "Chrome", "◉" to "Κάμερα", "▦" to "Εφαρμογές", "⚙" to "Ρυθμίσεις"
+     "◎" to "Μίλα", "☁" to "Καιρός", "▦" to "Ημερολόγιο",
+     "⌂" to "Σπίτι", "◫" to "Apps", "✉" to "Mail"
     ).forEachIndexed { index, item ->
-     val hoverScale by animateFloatAsState(if (selectedDock == index) 1.085f else 1f, label = "dockTouch$index")
+     val activeScale by animateFloatAsState(if (selectedDock == index) 1.08f else 1f,label="dockFloat$index")
      Column(
-      Modifier.weight(1f).height(82.dp)
-       .graphicsLayer { scaleX = hoverScale; scaleY = hoverScale }
-       .shadow(12.dp, RoundedCornerShape(20.dp))
-       .border(1.dp, accent.copy(alpha = .7f), RoundedCornerShape(20.dp))
-       .background(Color(0x88546696), RoundedCornerShape(20.dp))
+      Modifier.weight(1f).fillMaxHeight()
+       .graphicsLayer {scaleX=activeScale;scaleY=activeScale}
+       .background(if(selectedDock==index)accent.copy(alpha=.15f)else Color.Transparent,RoundedCornerShape(28.dp))
        .clickable {
-        selectedDock = index
-        when (index) {
+        selectedDock=index
+        when(index) {
          0 -> onListen()
-         1 -> focused = "weather"
-         2 -> focused = "calendar"
-         3 -> focused = "mail"
-         4 -> onOpenChrome()
-         5 -> onOpenCamera()
-         6 -> focused = "apps"
-         else -> settings = true
+         1 -> focused="weather"
+         2 -> focused="calendar"
+         3 -> focused="devices"
+         4 -> focused="apps"
+         5 -> focused="mail"
         }
-       }
-       .padding(7.dp),
-      horizontalAlignment = Alignment.CenterHorizontally,
-      verticalArrangement = Arrangement.Center
+       },
+      horizontalAlignment=Alignment.CenterHorizontally,
+      verticalArrangement=Arrangement.Center
      ) {
-      Text(item.first, color = white, fontSize = 26.sp)
-      Text(item.second, color = white, fontSize = 11.sp)
+      Text(item.first,color=if(index==0)accent else white.copy(alpha=.85f),fontSize=19.sp)
+      Text(item.second,color=white.copy(alpha=.75f),fontSize=9.sp)
      }
     }
    }
